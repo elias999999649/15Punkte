@@ -22,6 +22,7 @@ import {
   Coffee,
   TrendingUp,
   X,
+  Pencil,
 } from "lucide-react";
 
 type Section = "Dashboard" | "Fächer" | "Abitur" | "Einstellungen";
@@ -148,6 +149,7 @@ export default function App() {
   const [subjects, setSubjects] = useState(initialSubjects);
   const skipFirstSubjectSave = useRef(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [gradeTarget, setGradeTarget] = useState<string | null>(null);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
@@ -177,12 +179,24 @@ export default function App() {
 
   const average = useMemo(
     () =>
-      subjects.reduce((sum, item) => sum + item.current, 0) / subjects.length,
+      subjects.reduce((sum, item) => sum + item.current, 0) / Math.max(subjects.length, 1),
     [subjects],
   );
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  };
+  const saveGrade = (name: string, value: number) => {
+    setSubjects((current) => current.map((subject) => {
+      if (subject.name !== name) return subject;
+      const grades = [...subject.grades];
+      grades[0] = value;
+      const completed = grades.filter((grade): grade is number => grade !== null);
+      const nextAverage = (completed.reduce((sum, grade) => sum + grade, 0) / completed.length).toFixed(1).replace(".", ",");
+      return { ...subject, current: value, grades, average: nextAverage, trend: value > subject.previous ? "up" : value < subject.previous ? "down" : "same" };
+    }));
+    setGradeTarget(null);
+    notify(`Note für ${name} gespeichert.`);
   };
   const addSubject = (name: string, type: string) => {
     const initials = name.slice(0, 2).toUpperCase();
@@ -334,12 +348,13 @@ export default function App() {
               subjects={subjects}
               average={average}
               onAdd={() => setShowAdd(true)}
+              onEditGrade={(name) => setGradeTarget(name)}
               onOpenSubjects={() => setSection("Fächer")}
               onOpenAbi={() => setSection("Abitur")}
             />
           )}
           {section === "Fächer" && (
-            <SubjectsPage subjects={subjects} onAdd={() => setShowAdd(true)} />
+            <SubjectsPage subjects={subjects} onAdd={() => setShowAdd(true)} onEditGrade={(name) => setGradeTarget(name)} />
           )}
           {section === "Abitur" && <AbiturPage average={average} />}
           {section === "Einstellungen" && (
@@ -363,6 +378,7 @@ export default function App() {
       {showAdd && (
         <AddSubjectModal onClose={() => setShowAdd(false)} onAdd={addSubject} />
       )}
+      {gradeTarget && <GradeModal subject={subjects.find((subject) => subject.name === gradeTarget)!} onClose={() => setGradeTarget(null)} onSave={saveGrade} />}
       {toast && (
         <div className="toast" role="status">
           <Check size={15} />
@@ -379,12 +395,14 @@ function Dashboard({
   onAdd,
   onOpenSubjects,
   onOpenAbi,
+  onEditGrade,
 }: {
   subjects: Subject[];
   average: number;
   onAdd: () => void;
   onOpenSubjects: () => void;
   onOpenAbi: () => void;
+  onEditGrade: (name: string) => void;
 }) {
   const topSubjects = [...subjects]
     .sort((a, b) => b.current - a.current)
@@ -496,9 +514,7 @@ function Dashboard({
               <h2>Deine Fächer</h2>
               <p>Deine Leistung auf einen Blick.</p>
             </div>
-            <button className="text-button" onClick={onOpenSubjects}>
-              Alle Fächer <ArrowRight size={14} />
-            </button>
+            <div className="panel-heading-actions"><button className="text-button" onClick={onOpenSubjects}>Alle Fächer <ArrowRight size={14} /></button><button className="grade-edit-link" onClick={() => onEditGrade(subjects[0]?.name ?? "Mathematik")}><Pencil size={12} /> Note eintragen</button></div>
           </div>
           <div className="table-scroll">
             <table className="grades-table">
@@ -522,9 +538,7 @@ function Dashboard({
                         <small>{subject.type}</small>
                       </span>
                     </td>
-                    <td>
-                      <ScorePill value={subject.current} compact />
-                    </td>
+                    <td><button className="grade-cell-button" aria-label={`Note für ${subject.name} bearbeiten`} onClick={() => onEditGrade(subject.name)}><ScorePill value={subject.current} compact /></button></td>
                     <td>
                       <Trend trend={subject.trend} />
                     </td>
@@ -635,9 +649,11 @@ function Dashboard({
 function SubjectsPage({
   subjects,
   onAdd,
+  onEditGrade,
 }: {
   subjects: Subject[];
   onAdd: () => void;
+  onEditGrade: (name: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const filtered = subjects.filter((subject) =>
@@ -746,9 +762,7 @@ function SubjectsPage({
                       </span>
                     </td>
                   ))}
-                  <td>
-                    <strong className="table-average">{subject.average}</strong>
-                  </td>
+                  <td><button className="grade-cell-button" aria-label={`Note für ${subject.name} bearbeiten`} onClick={() => onEditGrade(subject.name)}><strong className="table-average">{subject.average}</strong></button></td>
                   <td>
                     <Trend trend={subject.trend} />
                   </td>
@@ -1056,4 +1070,10 @@ function AddSubjectModal({
       </form>
     </div>
   );
+}
+
+
+function GradeModal({ subject, onClose, onSave }: { subject: Subject; onClose: () => void; onSave: (name: string, grade: number) => void }) {
+  const [value, setValue] = useState(String(subject.current));
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="add-modal" onSubmit={(event) => { event.preventDefault(); onSave(subject.name, Number(value)); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">{subject.type.toUpperCase()}</span><h2>Halbjahresnote</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><p className="grade-modal-subject"><span className={`subject-mark ${subject.color}`}>{subject.code}</span>{subject.name}</p><label className="form-label">Punkte im aktuellen Halbjahr<select value={value} onChange={(event) => setValue(event.target.value)}>{Array.from({ length: 16 }, (_, index) => 15 - index).map((grade) => <option value={grade} key={grade}>{grade} Punkte{grade === 15 ? ' · sehr gut plus' : grade === 0 ? ' · ungenügend' : ''}</option>)}</select></label><div className="grade-scale">Notenskala: 0 bis 15 Punkte · Änderungen werden lokal gespeichert.</div><div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary"><Check size={15} /> Note speichern</button></div></form></div>;
 }
