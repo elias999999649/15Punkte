@@ -1,0 +1,20 @@
+---
+import App from '../components/App';
+import '../styles/global.css';
+
+const title = '15Punkte — Dein Abi. Im Überblick.';
+const description = 'Dein ruhiger Überblick über Noten, Fächer und Abitur. Für die gymnasiale Oberstufe in Baden-Württemberg.';
+---
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f8fa" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <App client:load />
+  </body>
+</html>
