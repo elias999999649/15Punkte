@@ -1,5 +1,7 @@
 # 15Punkte
 
+15pkt.pages.dev
+
 Minimalistischer Noten- und Abiturmanager für die gymnasiale Oberstufe in Baden-Württemberg. Das Astro-Projekt rendert die Seite statisch; React übernimmt die interaktive Oberfläche. Nutzerdaten werden im Browser gespeichert, es gibt keine Backend-Verbindung.
 
 ## Lokal entwickeln

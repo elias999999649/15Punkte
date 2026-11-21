@@ -24,6 +24,26 @@ import {
   X,
   Pencil,
 } from "lucide-react";
+import {
+  calculateOverall,
+  calculateSemester,
+  calculateSubject,
+  COLORS,
+  emptyGradebook,
+  EMPTY_SEMESTER_SETTINGS,
+  formatPoints,
+  GRADE_KINDS,
+  loadGradebook,
+  newId,
+  SEMESTERS,
+  semesterLabel,
+  type GradeArea,
+  type GradebookData,
+  type GradeKind,
+  type Performance,
+  type SchoolSubject,
+  type Semester,
+} from "../lib/gradebook";
 
 type Section = "Dashboard" | "Fächer" | "Abitur" | "Einstellungen";
 type Theme = "light" | "dark" | "sepia";
@@ -39,6 +59,28 @@ type Subject = {
   type: string;
 };
 
+function exampleGradebook(): GradebookData {
+  const data = emptyGradebook();
+  const subjects: [string, string, string, SchoolSubject["courseType"], number[]][] = [
+    ["Mathematik", "MA", "violet", "Leistungsfach", [13, 12, 14, 13]],
+    ["Deutsch", "DE", "rose", "Leistungsfach", [12, 13, 11, 12]],
+    ["Englisch", "EN", "blue", "Leistungsfach", [13, 14, 14, 15]],
+    ["Biologie", "BI", "green", "Basisfach", [10, 12, 11, 11]],
+    ["Geschichte", "GE", "amber", "Basisfach", [11, 12, 13, 12]],
+  ];
+  subjects.forEach(([name, code, color, courseType, grades]) => {
+    const id = newId();
+    const subject: SchoolSubject = { id, name, code, color, state: "Baden-Württemberg", courseType, weight: 1, settings: EMPTY_SEMESTER_SETTINGS() };
+    data.subjects.push(subject);
+    grades.forEach((points, index) => {
+      const kind: GradeKind = index % 2 === 0 ? "Klausur" : "Mündliche Note";
+      data.performances.push({ id: newId(), subjectId: id, semester: (index + 1) as Semester, points, kind, area: kind === "Klausur" ? "written" : "oral", date: `2026-0${index + 9}-12`, title: `${kind} · ${semesterLabel((index + 1) as Semester)}`, weight: 1 });
+    });
+  });
+  return data;
+}
+
+const initialGradebook = exampleGradebook;
 const initialSubjects: Subject[] = [
   {
     name: "Mathematik",
@@ -146,76 +188,104 @@ function Trend({ trend }: { trend: Subject["trend"] }) {
 export default function App() {
   const [section, setSection] = useState<Section>("Dashboard");
   const [theme, setTheme] = useState<Theme>("light");
-  const [subjects, setSubjects] = useState(initialSubjects);
-  const skipFirstSubjectSave = useRef(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [gradeTarget, setGradeTarget] = useState<string | null>(null);
+  const [gradebook, setGradebook] = useState<GradebookData>(() => exampleGradebook());
+  const skipFirstSave = useRef(true);
+  const [showSubject, setShowSubject] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<string | null>(null);
+  const [gradeTarget, setGradeTarget] = useState<{ subjectId?: string; performance?: Performance; semester?: Semester; manual?: boolean } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SchoolSubject | null>(null);
+  const [selectedSemester, setSelectedSemester] = useState<Semester>(1);
+  const [showCalculation, setShowCalculation] = useState(false);
   const [toast, setToast] = useState("");
+  const subjects = gradebook.subjects;
+  const performances = gradebook.performances;
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("15punkte-theme") as Theme | null;
     if (savedTheme && ["light", "dark", "sepia"].includes(savedTheme)) setTheme(savedTheme);
-    const savedSubjects = localStorage.getItem("15punkte-subjects");
-    if (savedSubjects) {
-      try {
-        const parsed = JSON.parse(savedSubjects) as Subject[];
-        if (Array.isArray(parsed)) setSubjects(parsed);
-      } catch {
-        localStorage.removeItem("15punkte-subjects");
-      }
-    }
+    setGradebook(loadGradebook());
   }, []);
   useEffect(() => {
-    if (skipFirstSubjectSave.current) {
-      skipFirstSubjectSave.current = false;
+    if (skipFirstSave.current) {
+      skipFirstSave.current = false;
       return;
     }
-    localStorage.setItem("15punkte-subjects", JSON.stringify(subjects));
-  }, [subjects]);
+    localStorage.setItem("15punkte-gradebook-v1", JSON.stringify(gradebook));
+  }, [gradebook]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("15punkte-theme", theme);
   }, [theme]);
 
-  const average = useMemo(
-    () =>
-      subjects.reduce((sum, item) => sum + item.current, 0) / Math.max(subjects.length, 1),
-    [subjects],
-  );
+  const overall = useMemo(() => calculateOverall(gradebook), [gradebook]);
+  const semesterResult = useMemo(() => calculateSemester(gradebook, selectedSemester), [gradebook, selectedSemester]);
+  const average = overall.average ?? 0;
+
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
   };
-  const saveGrade = (name: string, value: number) => {
-    setSubjects((current) => current.map((subject) => {
-      if (subject.name !== name) return subject;
-      const grades = [...subject.grades];
-      grades[0] = value;
-      const completed = grades.filter((grade): grade is number => grade !== null);
-      const nextAverage = (completed.reduce((sum, grade) => sum + grade, 0) / completed.length).toFixed(1).replace(".", ",");
-      return { ...subject, current: value, grades, average: nextAverage, trend: value > subject.previous ? "up" : value < subject.previous ? "down" : "same" };
+  const savePerformance = (performance: Performance) => {
+    setGradebook((current) => ({ ...current, performances: [...current.performances.filter((item) => item.id !== performance.id), performance] }));
+    setGradeTarget(null);
+    notify("Leistung gespeichert. Dein Schnitt wurde neu berechnet.");
+  };
+  const deletePerformance = (id: string) => {
+    setGradebook((current) => ({ ...current, performances: current.performances.filter((item) => item.id !== id) }));
+    setGradeTarget(null);
+    notify("Leistung gelöscht.");
+  };
+  const saveManualAverage = (subjectId: string, semester: Semester, points: number) => {
+    setGradebook((current) => ({
+      ...current,
+      performances: current.performances.filter((item) => !(item.subjectId === subjectId && item.semester === semester)),
+      subjects: current.subjects.map((subject) => {
+        if (subject.id !== subjectId) return subject;
+        const nextSettings: SchoolSubject["settings"] = {
+          ...subject.settings,
+          [semester]: { ...subject.settings[semester], mode: "manual", manualAverage: points },
+        };
+        return { ...subject, settings: nextSettings };
+      }),
     }));
     setGradeTarget(null);
-    notify(`Note für ${name} gespeichert.`);
+    notify("Manueller Durchschnitt gespeichert; Einzelnoten sind für dieses Fach und Halbjahr ausgeschlossen.");
   };
-  const addSubject = (name: string, type: string) => {
-    const initials = name.slice(0, 2).toUpperCase();
-    setSubjects((current) => [
+  const setEntryMode = (subjectId: string, semester: Semester, mode: "individual" | "manual") => {
+    setGradebook((current) => ({
       ...current,
-      {
-        name,
-        code: initials,
-        color: "teal",
-        current: 12,
-        previous: 12,
-        trend: "same",
-        grades: [null, null, null, null, null, null],
-        average: "—",
-        type,
-      },
-    ]);
-    setShowAdd(false);
-    notify(`${name} wurde zu deinen Fächern hinzugefügt.`);
+      performances: mode === "manual" ? current.performances.filter((item) => !(item.subjectId === subjectId && item.semester === semester)) : current.performances,
+      subjects: current.subjects.map((subject) => {
+        if (subject.id !== subjectId) return subject;
+        const nextSettings: SchoolSubject["settings"] = {
+          ...subject.settings,
+          [semester]: { ...subject.settings[semester], mode, manualAverage: mode === "individual" ? null : subject.settings[semester].manualAverage },
+        };
+        return { ...subject, settings: nextSettings };
+      }),
+    }));
+    notify(mode === "manual" ? "Manueller Modus aktiv. Einzelnoten dieses Fachs/Halbjahrs wurden entfernt." : "Einzelnotenmodus aktiv. Trage die Leistungen neu ein.");
+  };
+  const saveSubject = (subject: SchoolSubject) => {
+    setGradebook((current) => ({ ...current, subjects: current.subjects.some((item) => item.id === subject.id) ? current.subjects.map((item) => item.id === subject.id ? subject : item) : [...current.subjects, subject] }));
+    setShowSubject(false);
+    setEditingSubject(null);
+    notify(`${subject.name} gespeichert.`);
+  };
+  const deleteSubject = (subject: SchoolSubject) => {
+    setGradebook((current) => ({ ...current, subjects: current.subjects.filter((item) => item.id !== subject.id), performances: current.performances.filter((item) => item.subjectId !== subject.id) }));
+    setDeleteTarget(null);
+    notify(`${subject.name} und zugehörige Leistungen wurden gelöscht.`);
+  };
+  const saveWeights = (subjectId: string, semester: Semester, writtenWeight: number, oralWeight: number) => {
+    setGradebook((current) => ({ ...current, subjects: current.subjects.map((subject) => {
+      if (subject.id !== subjectId) return subject;
+      const nextSettings: SchoolSubject["settings"] = {
+        ...subject.settings,
+        [semester]: { ...subject.settings[semester], writtenWeight, oralWeight },
+      };
+      return { ...subject, settings: nextSettings };
+    }) }));
   };
 
   return (
@@ -343,26 +413,17 @@ export default function App() {
         </header>
 
         <div className="content-wrap">
-          {section === "Dashboard" && (
-            <Dashboard
-              subjects={subjects}
-              average={average}
-              onAdd={() => setShowAdd(true)}
-              onEditGrade={(name) => setGradeTarget(name)}
-              onOpenSubjects={() => setSection("Fächer")}
-              onOpenAbi={() => setSection("Abitur")}
-            />
-          )}
-          {section === "Fächer" && (
-            <SubjectsPage subjects={subjects} onAdd={() => setShowAdd(true)} onEditGrade={(name) => setGradeTarget(name)} />
-          )}
+          {section === "Dashboard" && <Dashboard subjects={subjects} performances={performances} semesters={overall.semesters} average={average} performanceCount={overall.performanceCount} onAddGrade={() => setGradeTarget({})} onOpenSubjects={() => setSection("Fächer")} />}
+          {section === "Fächer" && <SubjectsPage subjects={subjects} gradebook={gradebook} semester={selectedSemester} onSemester={setSelectedSemester} onAdd={() => setShowSubject(true)} onEdit={(subject) => { setEditingSubject(subject.id); setShowSubject(true); }} onDelete={setDeleteTarget} onGrade={(subject, manual = false) => setGradeTarget({ subjectId: subject.id, semester: selectedSemester, manual })} onWeights={saveWeights} onMode={setEntryMode} onPerformanceEdit={(performance) => setGradeTarget({ performance, subjectId: performance.subjectId, semester: performance.semester })} onPerformanceDelete={deletePerformance} />}
           {section === "Abitur" && <AbiturPage average={average} />}
           {section === "Einstellungen" && (
             <SettingsPage
               theme={theme}
               onTheme={setTheme}
               onReset={() => {
-                setSubjects(initialSubjects);
+                const fresh = initialGradebook();
+                setGradebook(fresh);
+                localStorage.removeItem("15punkte-gradebook-v1");
                 notify("Beispieldaten wurden wiederhergestellt.");
               }}
             />
@@ -375,10 +436,10 @@ export default function App() {
           </footer>
         </div>
       </main>
-      {showAdd && (
-        <AddSubjectModal onClose={() => setShowAdd(false)} onAdd={addSubject} />
-      )}
-      {gradeTarget && <GradeModal subject={subjects.find((subject) => subject.name === gradeTarget)!} onClose={() => setGradeTarget(null)} onSave={saveGrade} />}
+      {showSubject && <SubjectModal subject={subjects.find((subject) => subject.id === editingSubject)} onClose={() => { setShowSubject(false); setEditingSubject(null); }} onSave={saveSubject} />}
+      {gradeTarget && <PerformanceModal subjects={subjects} initial={gradeTarget.performance} initialSubjectId={gradeTarget.subjectId} initialSemester={gradeTarget.semester} manual={gradeTarget.manual} onClose={() => setGradeTarget(null)} onSave={savePerformance} onSaveManual={saveManualAverage} onDelete={deletePerformance} />}
+      {deleteTarget && <ConfirmDelete subject={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={() => deleteSubject(deleteTarget)} />}
+      {showCalculation && <CalculationModal result={semesterResult} semester={selectedSemester} onClose={() => setShowCalculation(false)} />}
       {toast && (
         <div className="toast" role="status">
           <Check size={15} />
@@ -389,7 +450,7 @@ export default function App() {
   );
 }
 
-function Dashboard({
+function LegacyDashboard({
   subjects,
   average,
   onAdd,
@@ -646,7 +707,7 @@ function Dashboard({
   );
 }
 
-function SubjectsPage({
+function LegacySubjectsPage({
   subjects,
   onAdd,
   onEditGrade,
@@ -1076,4 +1137,88 @@ function AddSubjectModal({
 function GradeModal({ subject, onClose, onSave }: { subject: Subject; onClose: () => void; onSave: (name: string, grade: number) => void }) {
   const [value, setValue] = useState(String(subject.current));
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="add-modal" onSubmit={(event) => { event.preventDefault(); onSave(subject.name, Number(value)); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">{subject.type.toUpperCase()}</span><h2>Halbjahresnote</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><p className="grade-modal-subject"><span className={`subject-mark ${subject.color}`}>{subject.code}</span>{subject.name}</p><label className="form-label">Punkte im aktuellen Halbjahr<select value={value} onChange={(event) => setValue(event.target.value)}>{Array.from({ length: 16 }, (_, index) => 15 - index).map((grade) => <option value={grade} key={grade}>{grade} Punkte{grade === 15 ? ' · sehr gut plus' : grade === 0 ? ' · ungenügend' : ''}</option>)}</select></label><div className="grade-scale">Notenskala: 0 bis 15 Punkte · Änderungen werden lokal gespeichert.</div><div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary"><Check size={15} /> Note speichern</button></div></form></div>;
+}
+
+
+function Dashboard({ subjects, performances, semesters, average, performanceCount, onAddGrade, onOpenSubjects }: { subjects: SchoolSubject[]; performances: Performance[]; semesters: ReturnType<typeof calculateOverall>["semesters"]; average: number; performanceCount: number; onAddGrade: () => void; onOpenSubjects: () => void }) {
+  const semesterResults = SEMESTERS.map((semester) => ({ semester, ...calculateSemester({ version: 1, subjects, performances }, semester) }));
+  const latest = [...semesterResults].reverse().find((item) => item.average !== null);
+  const ranked = (latest?.results ?? []).slice().sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
+  const best = ranked[0];
+  const weakest = ranked[ranked.length - 1];
+  const current = semesters.length ? semesters[semesters.length - 1] : null;
+  return <>
+    <section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> DEIN SCHULJAHR · KURSSTUFE 1</div><h1>Dein Abi. <span>Im Überblick.</span></h1><p>Deine Leistungen, klar und auf einen Blick.</p></div><button className="button button-primary" onClick={onAddGrade}><Plus size={16} /> Leistung eintragen</button></section>
+    <div className="model-notice"><Calculator size={14} /><span><strong>Persönliche Modellrechnung</strong> · unverbindlich, nicht die offizielle schulische Bewertung.</span></div>
+    <section className="metric-grid grade-metrics"><article className="metric-card main-metric"><div className="metric-top"><span>Gesamtdurchschnitt</span><span className="metric-icon lavender"><TrendingUp size={16} /></span></div><div className="metric-value">{average ? average.toFixed(2).replace(".", ",") : "–"}<span> Punkte</span></div><div className="metric-foot"><span>{subjects.length} Fächer mit anrechenbaren Werten</span></div></article><article className="metric-card"><div className="metric-top"><span>Eingetragene Leistungen</span><span className="metric-icon blue-tint"><BookOpen size={16} /></span></div><div className="metric-value">{performanceCount}<span> Noten</span></div><div className="metric-foot"><span>Einzelleistungen über alle Halbjahre</span></div></article><article className="metric-card"><div className="metric-top"><span>Bestes Fach · {latest ? semesterLabel(latest.semester) : "—"}</span><span className="metric-icon green-tint"><ArrowUpRight size={16} /></span></div><div className="metric-value small-metric-value">{best?.subject.name ?? "Noch offen"}</div><div className="metric-foot">{best?.average === null || best?.average === undefined ? "Noch kein Halbjahresschnitt" : `${best.average.toFixed(2).replace(".", ",")} Punkte`}</div></article><article className="metric-card"><div className="metric-top"><span>Niedrigster Schnitt · {latest ? semesterLabel(latest.semester) : "—"}</span><span className="metric-icon amber-tint"><ArrowDownRight size={16} /></span></div><div className="metric-value small-metric-value">{weakest?.subject.name ?? "Noch offen"}</div><div className="metric-foot">{weakest?.average === null || weakest?.average === undefined ? "Noch kein Halbjahresschnitt" : `${weakest.average.toFixed(2).replace(".", ",")} Punkte`}</div></article></section>
+    <section className="dashboard-columns grade-dashboard-columns"><article className="panel semester-overview"><div className="panel-heading"><div><h2>Durchschnitt je Halbjahr</h2><p>Deine Entwicklung auf Basis eingetragener Werte.</p></div><span className="course-tag">Modellrechnung</span></div><div className="semester-bars">{semesterResults.map(({ semester, average: termAverage, subjectCount }) => <div className="semester-bar" key={semester}><div className="semester-bar-top"><span>{semesterLabel(semester)}</span><strong>{termAverage === null ? "–" : termAverage.toFixed(2).replace(".", ",")}</strong></div><div className="semester-track"><span style={{ width: `${termAverage === null ? 0 : termAverage / 15 * 100}%` }} /></div><small>{subjectCount} Fächer</small></div>)}</div></article><article className="panel development-panel"><div className="panel-heading"><div><h2>Leistungsentwicklung</h2><p>Halbjahresschnitt im Verlauf.</p></div></div><div className="development-list">{semesterResults.map(({ semester, average: termAverage }, index) => { const previous = semesterResults[index - 1]?.average; const trend = termAverage === null || previous === null || previous === undefined ? "–" : termAverage > previous ? "↗" : termAverage < previous ? "↘" : "→"; return <div className="development-row" key={semester}><span className="development-semester">{semesterLabel(semester)}</span><span className="development-track"><i style={{ width: `${termAverage === null ? 0 : termAverage / 15 * 100}%` }} /></span><strong>{termAverage === null ? "–" : termAverage.toFixed(2).replace(".", ",")}</strong><span className={trend === "↗" ? "trend positive" : trend === "↘" ? "trend negative" : "trend flat"}>{trend}</span></div>; })}</div></article></section>
+    <article className="panel dashboard-subject-panel"><div className="panel-heading"><div><h2>Fächerübersicht</h2><p>{current ? `Aktuelles Halbjahr · ${semesterLabel(current.semester)}` : "Fachschnitte über die Halbjahre"}</p></div><button className="text-button" onClick={onOpenSubjects}>Fächer verwalten <ArrowRight size={14} /></button></div><div className="table-scroll"><table className="grades-table"><thead><tr><th>FACH</th><th>KURSART</th><th>H1</th><th>H2</th><th>H3</th><th>H4</th><th>AKTUELL</th></tr></thead><tbody>{subjects.map((subject) => { const results = SEMESTERS.map((semester) => calculateSubject(subject, performances, semester)); const selectedResult = calculateSubject(subject, performances, latest?.semester ?? 1); return <tr key={subject.id}><td><span className={`subject-mark ${subject.color}`}>{subject.code}</span><span className="subject-name">{subject.name}</span></td><td><span className="course-tag">{subject.courseType}</span></td>{results.map((result) => <td key={result.semester}><span className={result.average === null ? "history-empty" : "history-grade"}>{result.average === null ? "–" : result.average.toFixed(1).replace(".", ",")}</span></td>)}<td>{selectedResult.average === null ? <span className="history-empty">–</span> : <ScorePill value={Math.round(selectedResult.average)} compact />}</td></tr>; })}</tbody></table>{subjects.length === 0 && <p className="empty-search">Noch keine Fächer eingetragen.</p>}</div><div className="model-caption"><Calculator size={13} /> Gewichtete persönliche Modellrechnung; keine offizielle schulische Bewertung.</div></article>
+  </>;
+}
+
+function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit, onDelete, onGrade, onWeights, onMode, onPerformanceEdit, onPerformanceDelete }: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, written: number, oral: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const filtered = subjects.filter((subject) => `${subject.name} ${subject.code}`.toLowerCase().includes(query.toLowerCase()));
+  const semesterResult = calculateSemester(gradebook, semester);
+  return <>
+    <section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> NOTENVERWALTUNG · BADEN-WÜRTTEMBERG</div><h1>Deine <span>Fächer.</span></h1><p>Kurse, Gewichtungen und alle Leistungen an einem Ort.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Fach hinzufügen</button></section>
+    <div className="model-notice"><Calculator size={14} /><span><strong>Persönliche Modellrechnung</strong> · ersetzt nicht die offizielle schulische Bewertung.</span></div>
+    <section className="subject-summary"><div><span>Fächer</span><strong>{subjects.length}</strong></div><div><span>Leistungen · {semesterLabel(semester)}</span><strong>{gradebook.performances.filter((item) => item.semester === semester).length}</strong></div><div><span>Halbjahresschnitt · {semesterLabel(semester)}</span><strong>{semesterResult.average === null ? "–" : semesterResult.average.toFixed(2).replace(".", ",")}<small> Punkte</small></strong></div></section>
+    <article className="panel full-subjects subject-manager"><div className="panel-heading manager-heading"><div><h2>Kursübersicht</h2><p>Fach anklicken, um Noten, Gewichtung und Rechenweg zu verwalten.</p></div><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fach suchen" /></label></div><div className="semester-selector" aria-label="Halbjahr auswählen">{SEMESTERS.map((item) => <button key={item} className={semester === item ? "selected" : ""} onClick={() => onSemester(item)}>{semesterLabel(item)}</button>)}</div>
+      <div className="subject-list">{filtered.map((subject) => { const result = calculateSubject(subject, gradebook.performances, semester); const isExpanded = expanded === subject.id; const settings = subject.settings[semester]; return <section className={`managed-subject ${isExpanded ? "expanded" : ""}`} key={subject.id}><div className="managed-subject-main"><button className="subject-expand" onClick={() => setExpanded(isExpanded ? null : subject.id)} aria-expanded={isExpanded}><ChevronRight size={15} className="expand-chevron" /><span className={`subject-mark ${subject.color}`}>{subject.code}</span><span className="managed-subject-name"><strong>{subject.name}</strong><small>{subject.courseType} · Fachgewicht {subject.weight}× · {subject.state}</small></span></button><span className={`mode-badge ${settings.mode}`}>{settings.mode === "manual" ? "Manueller Schnitt" : "Einzelnoten"}</span><span className="managed-average">{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></span><div className="managed-actions"><button className="icon-button" aria-label={`${subject.name} bearbeiten`} onClick={() => onEdit(subject)}><Pencil size={14} /></button><button className="icon-button danger-hover" aria-label={`${subject.name} löschen`} onClick={() => onDelete(subject)}><X size={14} /></button></div></div>
+        {isExpanded && <div className="subject-details"><div className="entry-mode-row"><span>Eingabemodus für {semesterLabel(semester)}</span><button className={settings.mode === "individual" ? "mode-switch active" : "mode-switch"} onClick={() => settings.mode !== "individual" && onMode(subject.id, semester, "individual")}>Einzelleistungen</button><button className={settings.mode === "manual" ? "mode-switch active" : "mode-switch"} onClick={() => settings.mode !== "manual" && onGrade(subject, true)}>Durchschnitt manuell</button></div>
+          {settings.mode === "manual" ? <div className="manual-average-panel"><div><span>Manuell eingetragener Schnitt</span><strong>{settings.manualAverage === null ? "Noch nicht gesetzt" : `${settings.manualAverage.toFixed(2).replace(".", ",")} Punkte`}</strong><small>Einzelnoten werden in diesem Modus nicht mitgezählt.</small></div><button className="button button-quiet small-button" onClick={() => onGrade(subject, true)}><Pencil size={13} /> Durchschnitt bearbeiten</button></div> : <>
+            <div className="area-weight-grid"><AreaSummary title="Schriftlich" result={result.written} weight={settings.writtenWeight} onWeight={(value) => onWeights(subject.id, semester, value, settings.oralWeight)} /><AreaSummary title="Mündlich" result={result.oral} weight={settings.oralWeight} onWeight={(value) => onWeights(subject.id, semester, settings.writtenWeight, value)} /></div>
+            <div className="detail-actions"><button className="button button-primary small-button" onClick={() => onGrade(subject)}><Plus size={14} /> Leistung eintragen</button><button className="button button-quiet small-button" onClick={() => onGrade(subject, true)}>Bekannten Schnitt eintragen</button><span>Noten mit Faktor 0 werden ignoriert.</span></div>
+            {result.performances.length ? <div className="performance-table-wrap"><table className="performance-table"><thead><tr><th>LEISTUNG</th><th>BEREICH</th><th>DATUM</th><th>PUNKTE</th><th>FAKTOR</th><th></th></tr></thead><tbody>{result.performances.map((item) => <tr key={item.id}><td><strong>{item.title || item.kind}</strong><small>{item.kind}</small></td><td>{item.area === "written" ? "Schriftlich" : "Mündlich"}</td><td>{item.date ? new Date(`${item.date}T12:00:00`).toLocaleDateString("de-DE") : "–"}</td><td><ScorePill value={item.points} compact /></td><td>{item.weight}×</td><td><button className="text-button" onClick={() => onPerformanceEdit(item)}>Bearbeiten</button><button className="text-button remove-performance" onClick={() => onPerformanceDelete(item.id)} aria-label={`${item.title || item.kind} löschen`}><X size={14} /></button></td></tr>)}</tbody></table></div> : <p className="empty-performances">Noch keine Einzelleistungen in {semesterLabel(semester)} erfasst.</p>}
+          </>}
+          <details className="calculation-details"><summary>Rechenweg ansehen</summary><div className="calculation-copy">{settings.mode === "manual" ? <p>Manueller Modus: <strong>{settings.manualAverage === null ? "kein Durchschnitt eingetragen" : `${formatPoints(settings.manualAverage, 2)} Punkte`}</strong>. Es werden keine Einzelnoten angerechnet.</p> : <><p>Schriftlich: {result.written.count ? `(${result.performances.filter((item) => item.area === "written").map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(result.written.denominator, 2)} = ${formatPoints(result.written.average, 2)}` : "keine gewichteten Leistungen"}.</p><p>Mündlich: {result.oral.count ? `(${result.performances.filter((item) => item.area === "oral").map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(result.oral.denominator, 2)} = ${formatPoints(result.oral.average, 2)}` : "keine gewichteten Leistungen"}.</p><p>Fachschnitt: ({result.written.average === null ? "" : `${formatPoints(result.written.average, 2)} × ${settings.writtenWeight}`} {result.written.average !== null && result.oral.average !== null ? "+ " : ""}{result.oral.average === null ? "" : `${formatPoints(result.oral.average, 2)} × ${settings.oralWeight}`}) ÷ Summe aktiver Bereichsgewichte.</p></>}<p>Persönliche Modellrechnung – keine offizielle schulische Bewertung.</p></div></details>
+        </div>}
+      </section>; })}{filtered.length === 0 && <p className="empty-search">Keine Fächer gefunden.</p>}</div>
+    </article>
+  </>;
+}
+
+function AreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
+  return <div className="area-summary"><div className="area-summary-heading"><div><span>{title}</span><strong>{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></strong></div><span className="course-tag">{result.count} Leistungen</span></div><label>Bereichsgewicht <input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => onWeight(Math.max(0, Number(event.target.value)))} />×</label><small>Rechenfaktor {result.denominator.toFixed(2).replace(".", ",")}</small></div>;
+}
+
+
+function SubjectModal({ subject, onClose, onSave }: { subject?: SchoolSubject; onClose: () => void; onSave: (subject: SchoolSubject) => void }) {
+  const [name, setName] = useState(subject?.name ?? "");
+  const [code, setCode] = useState(subject?.code ?? "");
+  const [state, setState] = useState(subject?.state ?? "Baden-Württemberg");
+  const [courseType, setCourseType] = useState<SchoolSubject["courseType"]>(subject?.courseType ?? "Basisfach");
+  const [weight, setWeight] = useState(subject?.weight ?? 1);
+  const [defaultWritten, setDefaultWritten] = useState(subject?.settings[1].writtenWeight ?? 1);
+  const [defaultOral, setDefaultOral] = useState(subject?.settings[1].oralWeight ?? 1);
+  return <ModalFrame onClose={onClose} labelledBy="subject-modal-title"><form className="add-modal extended-modal" onSubmit={(event) => { event.preventDefault(); if (!name.trim() || !code.trim()) return; const settings = subject ? { ...subject.settings } : EMPTY_SEMESTER_SETTINGS(); SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: defaultWritten, oralWeight: defaultOral }; }); onSave({ id: subject?.id ?? newId(), name: name.trim(), code: code.trim().toUpperCase(), state, courseType, weight: Math.max(0.1, weight), settings, color: subject?.color ?? COLORS[(subject ? 0 : Date.now()) % COLORS.length] }); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">FÄCHERVERWALTUNG</span><h2 id="subject-modal-title">{subject ? "Fach bearbeiten" : "Fach hinzufügen"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><div className="form-grid"><label className="form-label">Fachname<input value={name} onChange={(event) => setName(event.target.value)} placeholder="z. B. Physik" maxLength={40} required /></label><label className="form-label">Kürzel<input value={code} onChange={(event) => setCode(event.target.value)} placeholder="PH" maxLength={5} required /></label><label className="form-label">Bundesland<select value={state} onChange={(event) => setState(event.target.value)}><option>Baden-Württemberg</option></select></label><label className="form-label">Kursart<select value={courseType} onChange={(event) => setCourseType(event.target.value as SchoolSubject["courseType"])}><option>Basisfach</option><option>Leistungsfach</option></select></label><label className="form-label">Fachgewicht (Gesamtschnitt)<input type="number" min="0.1" max="10" step="0.1" value={weight} onChange={(event) => setWeight(Number(event.target.value))} required /></label><label className="form-label">Schriftlich : mündlich<input aria-label="Schriftliches Gewicht" type="number" min="0" max="20" step="0.25" value={defaultWritten} onChange={(event) => setDefaultWritten(Number(event.target.value))} required /><span className="form-help">Schriftlich × {defaultWritten} : mündlich × {defaultOral}</span></label><label className="form-label">Mündliches Gewicht<input aria-label="Mündliches Gewicht" type="number" min="0" max="20" step="0.25" value={defaultOral} onChange={(event) => setDefaultOral(Number(event.target.value))} required /></label></div><p className="grade-scale">Gewichtungen gelten je Halbjahr und können in der Fächerübersicht individuell angepasst werden.</p><div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary" disabled={!name.trim() || !code.trim()}><Check size={15} /> {subject ? "Änderungen speichern" : "Fach anlegen"}</button></div></form></ModalFrame>;
+}
+
+function PerformanceModal({ subjects, initial, initialSubjectId, initialSemester, manual, onClose, onSave, onSaveManual, onDelete }: { subjects: SchoolSubject[]; initial?: Performance; initialSubjectId?: string; initialSemester?: Semester; manual?: boolean; onClose: () => void; onSave: (performance: Performance) => void; onSaveManual: (subjectId: string, semester: Semester, points: number) => void; onDelete: (id: string) => void }) {
+  const [subjectId, setSubjectId] = useState(initial?.subjectId ?? initialSubjectId ?? subjects[0]?.id ?? "");
+  const [semester, setSemester] = useState<Semester>(initial?.semester ?? initialSemester ?? 1);
+  const [points, setPoints] = useState(String(initial?.points ?? ""));
+  const [kind, setKind] = useState<GradeKind>(initial?.kind ?? "Klausur");
+  const [area, setArea] = useState<GradeArea>(initial?.area ?? "written");
+  const [date, setDate] = useState(initial?.date ?? new Date().toISOString().slice(0, 10));
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [weight, setWeight] = useState(initial?.weight ?? 1);
+  const [entryMode, setEntryMode] = useState<"individual" | "manual">(manual ? "manual" : "individual");
+  const selected = subjects.find((item) => item.id === subjectId);
+  const modeLabel = entryMode === "manual" ? "Manueller Durchschnitt · Einzelnoten ausgeschlossen" : "Einzelleistungen · Gewichtung pro Note";
+  return <ModalFrame onClose={onClose} labelledBy="performance-modal-title"><form className="add-modal extended-modal" onSubmit={(event) => { event.preventDefault(); if (!selected || points === "") return; const value = Math.max(0, Math.min(15, Number(points))); if (entryMode === "manual") { onSaveManual(subjectId, semester, value); return; } onSave({ id: initial?.id ?? newId(), subjectId, semester, points: value, kind, area: kind === "GFS" ? area : kind === "Klausur" || kind === "Test / Klassenarbeit" ? "written" : "oral", date, title: title.trim() || kind, weight: Math.max(0, weight) }); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">{modeLabel}</span><h2 id="performance-modal-title">{entryMode === "manual" ? "Fachschnitt eintragen" : initial ? "Leistung bearbeiten" : "Neue Leistung"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><div className="form-grid"><label className="form-label">Fach<select value={subjectId} onChange={(event) => setSubjectId(event.target.value)} required>{subjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label className="form-label">Halbjahr<select value={semester} onChange={(event) => setSemester(Number(event.target.value) as Semester)}>{SEMESTERS.map((item) => <option key={item} value={item}>{semesterLabel(item)}</option>)}</select></label>{entryMode === "manual" ? <><label className="form-label full-field">Bekannter Durchschnitt · 0–15 Punkte<input type="number" min="0" max="15" step="0.01" value={points} onChange={(event) => setPoints(event.target.value)} placeholder="z. B. 12,5" required autoFocus /></label><p className="manual-warning full-field">Der manuelle Schnitt ersetzt alle Einzelnoten dieses Fachs und Halbjahrs. So wird nichts doppelt gezählt.</p></> : <><label className="form-label">Punkte · 0 bis 15<input type="number" min="0" max="15" step="1" value={points} onChange={(event) => setPoints(event.target.value)} placeholder="z. B. 12" required autoFocus /></label><label className="form-label">Leistungsart<select value={kind} onChange={(event) => { const next = event.target.value as GradeKind; setKind(next); if (next === "GFS") setArea("oral"); }}>{GRADE_KINDS.map((item) => <option key={item}>{item}</option>)}</select></label>{kind === "GFS" && <label className="form-label full-field">GFS-Leistungsbereich<select value={area} onChange={(event) => setArea(event.target.value as GradeArea)}><option value="written">Schriftlicher Leistungsbereich</option><option value="oral">Mündlicher Leistungsbereich</option></select></label>}<label className="form-label">Datum<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label className="form-label">Gewichtungsfaktor<input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => setWeight(Number(event.target.value))} /><span className="form-help">0 schließt die Note aus dem Schnitt aus.</span></label><label className="form-label full-field">Bezeichnung / Thema<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="z. B. Analysis · Integralrechnung" maxLength={100} /></label><label className="form-label full-field mode-select-label">Eingabemodus<select value={entryMode} onChange={(event) => setEntryMode(event.target.value as "individual" | "manual")}><option value="individual">Einzelleistung (weitere Noten werden gewichtet gemittelt)</option><option value="manual">Bekannten Fachschnitt eintragen (Einzelnoten werden ersetzt)</option></select></label></>}</div><div className="modal-actions">{initial && <button type="button" className="button delete-button" onClick={() => onDelete(initial.id)}><X size={14} /> Löschen</button>}<button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary" disabled={!selected || points === ""}><Check size={15} /> {entryMode === "manual" ? "Durchschnitt speichern" : "Leistung speichern"}</button></div></form></ModalFrame>;
+}
+
+function ModalFrame({ children, onClose, labelledBy }: { children: React.ReactNode; onClose: () => void; labelledBy: string }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby={labelledBy}>{children}</div></div>;
+}
+
+function ConfirmDelete({ subject, onCancel, onConfirm }: { subject: SchoolSubject; onCancel: () => void; onConfirm: () => void }) {
+  return <ModalFrame onClose={onCancel} labelledBy="delete-subject-title"><div className="add-modal confirm-modal"><span className="eyebrow small-eyebrow">FACH UND LEISTUNGEN ENTFERNEN</span><h2 id="delete-subject-title">{subject.name} löschen?</h2><p>Das Fach und alle zugehörigen Einzelnoten werden dauerhaft aus diesem Browser entfernt.</p><div className="modal-actions"><button className="button button-quiet" onClick={onCancel}>Abbrechen</button><button className="button delete-button" onClick={onConfirm}><X size={14} /> Fach und Noten löschen</button></div></div></ModalFrame>;
+}
+
+function CalculationModal({ result, semester, onClose }: { result: ReturnType<typeof calculateSemester>; semester: Semester; onClose: () => void }) {
+  return <ModalFrame onClose={onClose} labelledBy="calculation-title"><div className="add-modal calculation-modal"><div className="modal-heading"><div><span className="eyebrow small-eyebrow">PERSÖNLICHE MODELLRECHNUNG</span><h2 id="calculation-title">Rechenweg · {semesterLabel(semester)}</h2></div><button className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><p className="calculation-lead">Halbjahresschnitt: <strong>{formatPoints(result.average, 2)} Punkte</strong></p><div className="calc-steps">{result.results.map((item) => <div className="calc-step" key={item.subject.id}><strong>{item.subject.name}</strong>{item.mode === "manual" ? <span>Manueller Fachschnitt · {formatPoints(item.average, 2)} P · keine Einzelnoten</span> : <span>Schriftlich {formatPoints(item.written.average, 2)} P × {item.subject.settings[semester].writtenWeight} · Mündlich {formatPoints(item.oral.average, 2)} P × {item.subject.settings[semester].oralWeight} · Fachgewicht {item.subject.weight}× → {formatPoints(item.average, 2)} P</span>}</div>)}</div><p className="manual-warning">Unverbindliche persönliche Modellrechnung. Die offizielle schulische Bewertung kann abweichen.</p><div className="modal-actions"><button className="button button-primary" onClick={onClose}>Schließen</button></div></div></ModalFrame>;
 }
