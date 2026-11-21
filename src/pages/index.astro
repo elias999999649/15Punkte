@@ -1,6 +1,40 @@
 ---
 import App from '../components/App';
 import '../styles/global.css';
+import { BADEN_WUERTTEMBERG_RULES, BW_ABITUR_2028_RULES } from '../lib/states/baden-wuerttemberg';
+
+const websiteUrl = 'https://15punkte.pages.dev';
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: '15Punkte',
+  applicationCategory: 'EducationalApplication',
+  operatingSystem: 'Web',
+  url: websiteUrl,
+  inLanguage: 'de-DE',
+  description: 'Lokaler Notenmanager mit Statistiken, Zielnoten, gewichteter Prognose und versionierten Abiturregeln für das allgemeinbildende Gymnasium in Baden-Württemberg.',
+  featureList: ['Fach- und Halbjahresschnitte', 'Notenstatistiken', 'Zielnoten', 'Prognose zukünftiger Leistungen', 'Lokaler JSON-Export und Import', 'Abiturregelwerk Baden-Württemberg'],
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'EUR' },
+};
+const aboutSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: 'Abiturregelwerk Baden-Württemberg',
+  about: 'Gymnasiale Oberstufe und Abiturjahrgang 2028',
+  url: `${websiteUrl}/#regeln`,
+  dateModified: BW_ABITUR_2028_RULES.sourceCheckedOn,
+  citation: [...BADEN_WUERTTEMBERG_RULES.sources, ...BW_ABITUR_2028_RULES.sources].map((source) => source.url),
+};
+const faqSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: [
+    { '@type': 'Question', name: 'Wo speichert 15Punkte meine Noten?', acceptedAnswer: { '@type': 'Answer', text: 'Fächer, Leistungen, Ziele und Einstellungen werden lokal in deinem Browser gespeichert. 15Punkte benötigt kein Nutzerkonto und überträgt persönliche Noten nicht an einen Server.' } },
+    { '@type': 'Question', name: 'Ist die Abiturnote eine amtliche Berechnung?', acceptedAnswer: { '@type': 'Answer', text: 'Die Abituransicht unterscheidet zwischen persönlicher Prognose und offizieller Berechnung. Fehlende Pflichtfach- und Zulassungsangaben werden angezeigt; eine verbindliche Entscheidung trifft die Schule.' } },
+    { '@type': 'Question', name: 'Für welche Oberstufe gelten die angezeigten Regeln?', acceptedAnswer: { '@type': 'Answer', text: 'Das dokumentierte Regelmodul bezieht sich auf das allgemeinbildende Gymnasium in Baden-Württemberg und den Abiturjahrgang 2028. Andere Jahrgänge müssen eigene geprüfte Regelmodule erhalten.' } },
+  ],
+};
+const jsonLd = (schema: object) => JSON.stringify(schema).replace(/</g, '\\u003c');
 
 const title = '15Punkte — Dein Abi. Im Überblick.';
 const description = 'Dein ruhiger Überblick über Noten, Fächer und Abitur. Für die gymnasiale Oberstufe in Baden-Württemberg.';
@@ -12,6 +46,16 @@ const description = 'Dein ruhiger Überblick über Noten, Fächer und Abitur. F�
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7f8fa" />
     <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="15Punkte" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={websiteUrl} />
+    <meta name="twitter:card" content="summary" />
+    <link rel="canonical" href={websiteUrl} />
+    <script type="application/ld+json" set:html={jsonLd(structuredData)} />
+    <script type="application/ld+json" set:html={jsonLd(aboutSchema)} />
+    <script type="application/ld+json" set:html={jsonLd(faqSchema)} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preload" href="/fonts/GoogleSansFlex-Regular.ttf" as="font" type="font/ttf" crossorigin />
     <title>{title}</title>
