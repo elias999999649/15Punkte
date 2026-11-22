@@ -246,7 +246,7 @@ export function validateGradebookDocument(value: unknown): { ok: true; document:
   }
   const performanceIds = new Set<string>();
   for (const item of document.data.performances) {
-    if (!item || typeof item.id !== "string" || !item.id || performanceIds.has(item.id) || !subjectIds.has(item.subjectId) || ![1, 2, 3, 4].includes(item.semester) || !Number.isInteger(item.points) || item.points < 0 || item.points > 15 || !(GRADE_KINDS.includes(item.kind) || customGradeKinds.includes(item.kind)) || !["written", "oral"].includes(item.area) || !Number.isFinite(item.weight) || item.weight < 0 || typeof item.title !== "string" || typeof item.date !== "string") return { ok: false, error: "Mindestens eine Leistung enthält ungültige Angaben (Fach, Halbjahr, Punkte oder Gewichtung)." };
+    if (!item || typeof item.id !== "string" || !item.id || performanceIds.has(item.id) || !subjectIds.has(item.subjectId) || ![1, 2, 3, 4].includes(item.semester) || !Number.isFinite(item.points) || item.points < 0 || item.points > 15 || !(GRADE_KINDS.includes(item.kind) || customGradeKinds.includes(item.kind)) || !["written", "oral"].includes(item.area) || !Number.isFinite(item.weight) || item.weight < 0 || typeof item.title !== "string" || typeof item.date !== "string") return { ok: false, error: "Mindestens eine Leistung enthält ungültige Angaben (Fach, Halbjahr, Punkte oder Gewichtung)." };
     if (document.data.subjects.find((subject) => subject.id === item.subjectId)!.settings[item.semester].mode === "manual") return { ok: false, error: "Die Datei enthält zugleich einen manuellen Schnitt und Einzelnoten für dasselbe Fach/Halbjahr." };
     performanceIds.add(item.id);
   }

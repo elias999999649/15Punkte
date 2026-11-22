@@ -710,3 +710,46 @@ body { font-size: 15px; }
 .subject-summary span { font-size: 12px; }
 .subject-summary strong small { font-size: 11px; }
 @media (max-width: 600px) { .subject-summary span { font-size: 10px; } .subject-summary strong small { font-size: 9px; } }
+
+/* Consistent readable type and stable native table layout. */
+body { font-size: 16px; }
+.panel-heading h2, .settings-section-title h2 { font-size: 17px; }
+.panel-heading p, .settings-section-title p, .text-button { font-size: 14px; }
+.grades-table td:first-child { display: table-cell; vertical-align: middle; }
+.grades-table th, .performance-table th { font-size: 12px; letter-spacing: .35px; padding-top: 12px; padding-bottom: 12px; }
+.grades-table td, .performance-table td { font-size: 14px; padding-top: 11px; padding-bottom: 11px; }
+.performance-table td:first-child strong { font-size: 14px; }
+.performance-table td:first-child small { font-size: 12px; }
+.performance-table td:last-child .text-button { font-size: 13px; }
+.metric-top, .metric-foot, .focus-message p, .development-copy, .form-help { font-size: 13px; }
+.form-label { font-size: 14px; }
+.form-label input, .form-label select { font-size: 16px; min-height: 44px; }
+.managed-subject-name small, .mode-badge, .managed-average small { font-size: 12px; }
+.subject-summary span { font-size: 12px; }
+.subject-summary strong small { font-size: 12px; }
+.table-scroll, .performance-table-wrap { max-width: 100%; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.grades-table, .performance-table { table-layout: auto; }
+@media (max-width: 600px) {
+  .content-wrap { padding-left: 16px; padding-right: 16px; }
+  .page-heading p { font-size: 14px; max-width: none; }
+  .metric-top, .metric-foot { font-size: 12px; }
+  .grades-table { min-width: 520px; }
+  .performance-table { min-width: 720px; }
+  .grades-table th, .performance-table th { font-size: 12px; }
+  .grades-table td, .performance-table td { font-size: 14px; }
+  .subject-summary span { font-size: 11px; }
+  .subject-summary strong small { font-size: 10px; }
+}
+
+.page-footer, .school-year { font-size: 12px; }
+.small-eyebrow { font-size: 10px; letter-spacing: .6px; }
+.score-suffix { font-size: 10px; }
+.trend, .focus-rank, .course-tag { font-size: 12px; }
+.remove-performance { margin-left: 12px; }
+.dashboard-columns, .right-column { gap: 18px; }
+@media (max-width: 600px) {
+  .page-footer, .school-year { font-size: 11px; }
+  .small-eyebrow { font-size: 9px; }
+  .grades-table, .performance-table { min-width: 560px; }
+  .performance-table { min-width: 740px; }
+}
