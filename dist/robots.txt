@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://15punkte.pages.dev/sitemap.xml
+Sitemap: https://15pkt.pages.dev/sitemap.xml

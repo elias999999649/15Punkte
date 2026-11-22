@@ -234,10 +234,11 @@ export function validateGradebookDocument(value: unknown): { ok: true; document:
   if (record.schemaVersion !== GRADEBOOK_SCHEMA_VERSION) return { ok: false, error: `Nicht unterstützte Datenversion (${String(record.schemaVersion)}). Erwartet wird Version ${GRADEBOOK_SCHEMA_VERSION}.` };
   const document = record as unknown as GradebookDocument;
   if (!document.data || !Array.isArray(document.data.subjects) || !Array.isArray(document.data.performances) || !Array.isArray(document.goals) || !document.preferences) return { ok: false, error: "Datenstruktur unvollständig." };
-  const customGradeKinds = document.preferences.customGradeKinds ?? [];
-  if (!Array.isArray(customGradeKinds)) return { ok: false, error: "Die eigenen Notenarten sind ungültig." };
-  const normalizedKinds = customGradeKinds.map((kind) => typeof kind === "string" ? kind.trim().toLocaleLowerCase("de") : "");
-  if (customGradeKinds.length > 30 || customGradeKinds.some((kind, index) => typeof kind !== "string" || !kind.trim() || kind.length > 40 || GRADE_KINDS.some((standard) => standard.toLocaleLowerCase("de") === normalizedKinds[index])) || new Set(normalizedKinds).size !== customGradeKinds.length) return { ok: false, error: "Die eigenen Notenarten enthalten ungültige oder doppelte Einträge." };
+  const rawCustomGradeKinds = document.preferences.customGradeKinds ?? [];
+  if (!Array.isArray(rawCustomGradeKinds)) return { ok: false, error: "Die eigenen Notenarten sind ungültig." };
+  const customGradeKinds = rawCustomGradeKinds.map((kind) => typeof kind === "string" ? kind.trim().replace(/\s+/g, " ") : "");
+  const normalizedKinds = customGradeKinds.map((kind) => kind.toLocaleLowerCase("de"));
+  if (customGradeKinds.length > 30 || customGradeKinds.some((kind, index) => typeof rawCustomGradeKinds[index] !== "string" || !kind || kind.length > 40 || GRADE_KINDS.some((standard) => standard.toLocaleLowerCase("de") === normalizedKinds[index])) || new Set(normalizedKinds).size !== customGradeKinds.length) return { ok: false, error: "Die eigenen Notenarten enthalten ungültige oder doppelte Einträge." };
   const subjectIds = new Set<string>();
   for (const subject of document.data.subjects) {
     if (!subject || typeof subject.id !== "string" || !subject.id || subjectIds.has(subject.id) || typeof subject.name !== "string" || !subject.name.trim() || typeof subject.code !== "string" || !(subject.courseType === "Basisfach" || subject.courseType === "Leistungsfach") || !Number.isFinite(subject.weight) || subject.weight <= 0 || !subject.settings || ![1, 2, 3, 4].every((semester) => subject.settings[semester as Semester] && ["individual", "manual"].includes(subject.settings[semester as Semester].mode))) return { ok: false, error: "Mindestens ein Fach enthält ungültige oder fehlende Angaben." };
