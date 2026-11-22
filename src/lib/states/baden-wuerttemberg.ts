@@ -45,13 +45,13 @@ export const BADEN_WUERTTEMBERG_RULES = {
   fundamentals: {
     pointScale: "0–15 Punkte pro Kurs und Prüfung; die Kursstufe im allgemeinbildenden Gymnasium umfasst vier Kurshalbjahre.",
     phases: "Einführungsphase vor Eintritt in die zweijährige Qualifikationsphase. Die Kursbelegung, Kurswahl und Prüfungsfachkombination hängen vom Abiturjahrgang und der geltenden AGVO ab.",
-    blocks: "Abitur 2028: Block I umfasst 40 eingebrachte Kurse (12 Leistungskurs-Halbjahreskurse doppelt, 28 weitere Kurse einfach; Faktor 40/48), maximal 600 Punkte. Block II umfasst fünf Prüfungsfächer, alle vierfach gewertet, maximal 300 Punkte. Gesamt maximal 900.",
+    blocks: "Abitur 2028: Block I umfasst 40 eingebrachte Kurse. Zwei der drei Leistungsfächer werden mit ihren je vier Kursen doppelt gewichtet; die übrigen Kurse zählen einfach. Das Ergebnis wird mit 40/48 multipliziert, maximal 600 Punkte. Block II umfasst fünf Prüfungsfächer, grundsätzlich vierfach gewertet, maximal 300 Punkte. Gesamt maximal 900.",
   },
   verifiedFacts: [
     "Die AGVO ist die Rechtsgrundlage; die detaillierte Jahrgangszuordnung wird mit dem offiziellen KM-Leitfaden Abitur 2028 vom 16.12.2025 konkretisiert.",
     "Einführungsphase und Qualifikationsphase sind getrennt; die Qualifikationsphase der Kursstufe umfasst vier Halbjahre.",
-    "Drei Leistungsfächer werden über vier Halbjahre belegt; die 12 Leistungskurskurse zählen im Block I doppelt, 28 weitere Kurse einfach.",
-    "Block I wird aus 40 Kursen nach Formel (2 × Summe der 12 LF-Kurse + Summe der 28 weiteren Kurse) × 40/48 berechnet; maximal 600 Punkte.",
+    "Drei Leistungsfächer werden über vier Halbjahre belegt. Zwei der drei Fächer werden ausgewählt und ihre jeweils vier Kurse im Block I doppelt gewichtet; das dritte Leistungsfach zählt einfach.",
+    "Block I wird aus 40 Kursen berechnet: Die acht Kurse aus zwei gewählten Leistungsfächern zählen doppelt, alle übrigen einfach. Die gewichtete Summe wird mit 40/48 multipliziert; maximal 600 Punkte.",
     "Block II: fünf Prüfungsfächer, darunter drei schriftliche; alle fünf Ergebnisse vierfach, maximal 300 Punkte.",
     "Für die Gesamtqualifikation gelten Mindestwerte 200 Punkte in Block I, 100 in Block II und 300 insgesamt; Unterkurse/Prüfungsergebnisse unter 5 Punkten sind begrenzt.",
     "Die offizielle Durchschnittsnote wird anhand der Notentabelle im Abitur-2028-Leitfaden aus der Gesamtpunktzahl ermittelt.",
@@ -59,7 +59,7 @@ export const BADEN_WUERTTEMBERG_RULES = {
   unresolved: [
     "Die vollständige schulische Kurswahl-/Belegpflichtprüfung (Fremdsprachen, Aufgabenfelder, Profil und Sonderfälle) ist noch nicht umgesetzt; eine automatische Zulassungsentscheidung ist daher ausgeschlossen.",
     "Prüfungsfachkombinationen und Kursbelegung müssen anhand der konkreten Schullaufbahn und der für den Jahrgang geltenden AGVO-Prüfungsordnung bestätigt werden.",
-    "Persönliche Teilprognosen aus noch nicht erbrachten Leistungen sind Szenarien, kein offizielles Ergebnis; im Rechner werden sie nicht mit bereits erreichten Punkten vermischt.",
+    "Die Punktwerte bilden eine rechnerische Orientierung. Die schulische Kursbelegung und Zulassung werden nicht vollständig automatisiert geprüft.",
     "Andere Abiturjahrgänge benötigen ein eigenes versioniertes und fachlich geprüftes Regelmodul.",
   ],
   requirements: [
@@ -102,7 +102,7 @@ export const BADEN_WUERTTEMBERG_RULES = {
 } as const;
 
 
-export type AbiturCourseGrade = { subjectId: string; subjectName: string; semester: 1 | 2 | 3 | 4; points: number | null; courseType: "Leistungsfach" | "Basisfach"; compulsory?: boolean; excluded?: boolean };
+export type AbiturCourseGrade = { subjectId: string; subjectName: string; semester: 1 | 2 | 3 | 4; points: number | null; courseType: "Leistungsfach" | "Basisfach"; doubled?: boolean; compulsory?: boolean; excluded?: boolean };
 export type ExamSubject = { subjectId: string; subjectName: string; points: number | null; written: boolean; oral: boolean };
 export type AbiturSimulationInput = { courses: AbiturCourseGrade[]; exams: ExamSubject[]; confirmedEligible?: boolean };
 export type QualificationStatus = "passed" | "failed" | "incomplete";
@@ -113,8 +113,20 @@ export function simulateAbitur(input: AbiturSimulationInput) {
   const mandatory = input.courses.filter((course) => course.compulsory);
   const courseCompleteness = mandatory.length === 0 ? "missing-requirement-map" as const : mandatory.every((course) => course.points !== null) ? "complete" as const : "incomplete" as const;
   const included = input.courses.filter((course) => !course.excluded && course.points !== null);
-  const coursesValid = included.length === 40 && included.filter((course) => course.courseType === "Leistungsfach").length === 12;
-  const blockI = coursesValid ? (included.filter((course) => course.courseType === "Leistungsfach").reduce((sum, course) => sum + (course.points ?? 0), 0) * 2 + included.filter((course) => course.courseType === "Basisfach").reduce((sum, course) => sum + (course.points ?? 0), 0)) / 40 * 40 : null;
+  const advancedCourses = included.filter((course) => course.courseType === "Leistungsfach");
+  const advancedSubjects = new Set(advancedCourses.map((course) => course.subjectId));
+  const threeCompleteAdvancedSubjects = advancedSubjects.size === 3 && [...advancedSubjects].every((subjectId) => {
+    const semesters = new Set(advancedCourses.filter((course) => course.subjectId === subjectId).map((course) => course.semester));
+    return semesters.size === 4 && [1, 2, 3, 4].every((semester) => semesters.has(semester as AbiturCourseGrade["semester"]));
+  });
+  const doubledSubjects = new Set(advancedCourses.filter((course) => course.doubled).map((course) => course.subjectId));
+  const twoCompleteDoubledSubjects = doubledSubjects.size === 2 && [...doubledSubjects].every((subjectId) => {
+    const semesters = new Set(advancedCourses.filter((course) => course.subjectId === subjectId).map((course) => course.semester));
+    return semesters.size === 4 && [1, 2, 3, 4].every((semester) => semesters.has(semester as AbiturCourseGrade["semester"]));
+  });
+  const coursesValid = included.length === 40 && advancedCourses.length === 12 && threeCompleteAdvancedSubjects && twoCompleteDoubledSubjects;
+  const weightedCourseTotal = included.reduce((sum, course) => sum + (course.points ?? 0) * (course.courseType === "Leistungsfach" && course.doubled ? 2 : 1), 0);
+  const blockI = coursesValid ? weightedCourseTotal * 40 / 48 : null;
   const fiveExams = input.exams.length === 5 && new Set(input.exams.map((exam) => exam.subjectId)).size === 5;
   const hasThreeWritten = input.exams.filter((exam) => exam.written).length === 3;
   const examComplete = fiveExams && input.exams.every((exam) => exam.points !== null) && hasThreeWritten;
@@ -123,8 +135,10 @@ export function simulateAbitur(input: AbiturSimulationInput) {
   const missing: string[] = [];
   if (courseCompleteness === "missing-requirement-map") missing.push("Die jahrgangsspezifische Pflichtkurs-/Belegliste ist nicht vollständig hinterlegt.");
   if (courseCompleteness === "incomplete") missing.push("Punkte für verpflichtend einzubringende Kurse fehlen.");
-  if (included.length < 40) missing.push(`Block I benötigt genau 40 eingebrachte Kurse; aktuell ${included.length}.`);
+  if (included.length !== 40) missing.push(`Block I benötigt genau 40 eingebrachte Kurse; aktuell ${included.length}.`);
   if (included.filter((course) => course.courseType === "Leistungsfach").length !== 12) missing.push("Block I setzt 12 Halbjahreskurse aus den drei Leistungsfächern voraus.");
+  else if (!threeCompleteAdvancedSubjects) missing.push("Die zwölf LK-Kurse müssen aus drei Leistungsfächern mit je vier Halbjahren stammen.");
+  else if (!twoCompleteDoubledSubjects) missing.push("Wähle genau zwei der drei Leistungsfächer für die doppelte Gewichtung aus.");
   if (!fiveExams) missing.push("Es müssen fünf unterschiedliche Abiturprüfungsfächer ausgewählt sein.");
   if (!hasThreeWritten) missing.push("Die Prüfungskonfiguration muss drei schriftliche Prüfungsfächer ausweisen.");
   if (input.exams.some((exam) => exam.points === null)) missing.push("Ergebnisse ausstehender Abiturprüfungen fehlen.");
@@ -137,7 +151,7 @@ export function simulateAbitur(input: AbiturSimulationInput) {
   const status: QualificationStatus = missing.length ? "incomplete" : blockIValid && examResultsValid && totalValid ? "passed" : "failed";
   return {
     blockI, blockII, total: resultTotal,
-    grade: status === "passed" ? officialGrade(resultTotal) : null,
+    grade: blockIValid && examResultsValid && totalValid ? officialGrade(resultTotal) : null,
     status, missing,
     checks: { courseCompleteness, coursesValid, blockIValid, examComplete, examResultsValid, totalValid, confirmedEligible: Boolean(input.confirmedEligible) },
     counts: { included: included.length, advanced: included.filter((course) => course.courseType === "Leistungsfach").length, coursePoints: courseTotal, exams: input.exams.length },
@@ -156,7 +170,7 @@ export const BW_ABITUR_2028_RULES = {
     { label: "Schule-BW – Abitur und Oberstufe", url: "https://www.schule-bw.de/faecher-und-schularten/schularten/gymnasium/oberstufe/abitur", checked: "2026-11-21", note: "Offizielle Landesbildungsserver-Übersicht mit Materialien und jahrgangsbezogenen Hinweisen." },
   ],
   verifiedFacts: [
-    "Für den Abiturjahrgang 2028 sind drei Leistungsfächer über alle vier Halbjahre zu belegen; im Block I gehen die zwölf LF-Kurse doppelt und 28 weitere Kurse einfach ein.",
+    "Für den Abiturjahrgang 2028 sind drei Leistungsfächer über alle vier Halbjahre zu belegen. Zwei der drei Leistungsfächer werden ausgewählt; deren acht Kurse zählen doppelt. Das dritte Leistungsfach zählt einfach.",
     "Block I: genau 40 Kurse, höchstens 600 Punkte; Berechnungsfaktor 40/48 auf die gewichtete Kurssumme.",
     "Block II: fünf Prüfungsfächer, darunter drei schriftliche; alle fünf Ergebnisse vierfach gewertet, höchstens 300 Punkte.",
     "Gesamtqualifikation höchstens 900 Punkte. Zum Bestehen: mindestens 200 in Block I, mindestens 100 in Block II und mindestens 300 insgesamt; Block-I-Unterkurse und Block-II-Ergebnisse unter 5 Punkten sind zusätzlich begrenzt.",
