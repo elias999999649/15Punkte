@@ -1,0 +1,47 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  canonical: string;
+  eyebrow: string;
+  heading: string;
+  intro: string;
+  appHref: string;
+  cta: string;
+}
+
+const { title, description, canonical, eyebrow, heading, intro, appHref, cta } = Astro.props;
+---
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/jpeg" href="/faviconandlogo.jpg" />
+    <meta name="theme-color" content="#f7f8fa" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <main class="seo-page">
+      <article class="seo-card">
+        <a class="seo-brand" href="/" aria-label="15Punkte Startseite">
+          <img src="/faviconandlogo.jpg" alt="" />
+          <span>15Punkte</span>
+        </a>
+        <p class="eyebrow small-eyebrow">{eyebrow}</p>
+        <h1>{heading}</h1>
+        <p class="seo-lead">{intro}</p>
+        <div class="seo-content">
+          <slot />
+        </div>
+        <a class="button button-primary seo-cta" href={appHref}>{cta}</a>
+        <a class="seo-back-link" href="/">Zur Startseite</a>
+      </article>
+    </main>
+  </body>
+</html>

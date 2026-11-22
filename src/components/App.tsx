@@ -32,6 +32,7 @@ import { Dashboard } from "./Dashboard";
 import { GradeEntryModal } from "./GradeEntryModal";
 import { CalculationDialog } from "./CalculationDialog";
 import { FirebaseAccountPanel, type CloudStatus } from "./FirebaseAccountPanel";
+import { WelcomeSignInModal } from "./WelcomeSignInModal";
 import {
   calculateOverall,
   calculateSemester,
@@ -224,6 +225,9 @@ function errorMessage(error: unknown) {
   if (code === "auth/operation-not-allowed") {
     return "Google-Anmeldung ist in Firebase Authentication noch nicht aktiviert.";
   }
+  if (code === "permission-denied" || code === "firestore/permission-denied") {
+    return "Firebase Firestore hat den Zugriff verweigert. Veröffentliche die aktuellen Regeln aus firestore.rules im Projekt punkte-342dd (Firebase Console → Firestore Database → Regeln) und prüfe, ob du das richtige Firebase-Projekt verwendest.";
+  }
   return error instanceof Error
     ? error.message
     : "Ein unbekannter Fehler ist aufgetreten.";
@@ -301,7 +305,11 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [pendingImport, setPendingImport] = useState<import("../lib/gradebook").GradebookDocument | null>(null);
   const [pendingReset, setPendingReset] = useState(false);
+  const [showFirstSignInPrompt, setShowFirstSignInPrompt] = useState(false);
   useEffect(() => {
+    const requestedSection = new URLSearchParams(window.location.search).get("bereich");
+    const sectionFromUrl = navItems.find(({ label }) => label === requestedSection)?.label;
+    if (sectionFromUrl) setSection(sectionFromUrl);
     const openRules = () => setSection("Regeln");
     const openCalculator = () => setSection("Rechner");
     window.addEventListener("open-rules", openRules);
@@ -462,7 +470,7 @@ export default function App() {
                 if (!active || currentSession !== sessionVersion) return;
                 setCloudStatus("error");
                 setCloudReady(false);
-                setAccountError(`Cloud-Daten konnten nicht geladen werden: ${error.message}`);
+                setAccountError(`Cloud-Daten konnten nicht geladen werden: ${errorMessage(error)}`);
               },
             );
           },
@@ -489,6 +497,18 @@ export default function App() {
       documentSubscription?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (authUser) {
+      localStorage.setItem("15punkte-auth-prompt-dismissed", "true");
+      setShowFirstSignInPrompt(false);
+      return;
+    }
+    if (!authReady || !guestReady) return;
+    if (localStorage.getItem("15punkte-auth-prompt-dismissed") !== "true") {
+      setShowFirstSignInPrompt(true);
+    }
+  }, [authReady, guestReady, authUser]);
 
   useEffect(() => {
     if (!authReady || !guestReady || authUser) return;
@@ -589,6 +609,10 @@ export default function App() {
     } finally {
       setAccountBusy(false);
     }
+  };
+  const continueAsGuest = () => {
+    localStorage.setItem("15punkte-auth-prompt-dismissed", "true");
+    setShowFirstSignInPrompt(false);
   };
   const handleGoogleSignOut = async () => {
     setAccountBusy(true);
@@ -880,6 +904,7 @@ export default function App() {
       {pendingReset && <ConfirmAction title="Alle persönlichen Daten löschen?" message="Alle Fächer, Leistungen, Ziele und Einstellungen werden unwiderruflich aus diesem Browser entfernt. Exportiere vorher ein Backup, falls du die Daten behalten möchtest." confirmLabel="Alle Daten löschen" onCancel={() => setPendingReset(false)} onConfirm={confirmReset} />}
       {pendingCloudImport && <ConfirmAction title={cloudDataExists ? "Cloud-Daten ersetzen?" : "Lokale Sicherung übernehmen?"} message={cloudDataExists ? "Die vorhandenen Cloud-Daten werden durch die lokale Sicherung ersetzt. Vorher wird die aktuelle Cloud-Sicherung als JSON heruntergeladen. Fahre nur fort, wenn du diese Änderung möchtest." : "Deine lokale Sicherung wird in dein Google-Konto kopiert. Sie bleibt zusätzlich als Gastdaten auf diesem Gerät erhalten."} confirmLabel="Lokale Daten übernehmen" onCancel={() => setPendingCloudImport(false)} onConfirm={() => void confirmLocalCloudImport()} />}
       {pendingAccountDelete && <ConfirmAction title="Google-Konto und Cloud-Daten löschen?" message="Das Notenbuch in Firestore und dein Firebase-Anmeldekonto werden dauerhaft gelöscht. Deine getrennt gespeicherten Gastdaten auf diesem Gerät bleiben erhalten. Zur Bestätigung wirst du möglicherweise erneut bei Google angemeldet." confirmLabel="Konto endgültig löschen" onCancel={() => setPendingAccountDelete(false)} onConfirm={() => void confirmAccountDelete()} />}
+      {showFirstSignInPrompt && !authUser && <WelcomeSignInModal busy={accountBusy} authAvailable={authReady && Boolean(firebaseApi.current)} error={accountError} onSignIn={() => void handleGoogleSignIn()} onContinueAsGuest={continueAsGuest} />}
       {hasUnsavedWarning && <div className="storage-warning" role="alert">Speichern im Browser ist fehlgeschlagen oder der gespeicherte Datenstand war ungültig. Exportiere deine Daten als Backup.</div>}
       {toast && (
         <div className="toast" role="status">

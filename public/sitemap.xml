@@ -4,4 +4,16 @@
     <loc>https://15pkt.pages.dev/</loc>
     <changefreq>weekly</changefreq>
   </url>
+  <url>
+    <loc>https://15pkt.pages.dev/notenrechner/</loc>
+    <changefreq>monthly</changefreq>
+  </url>
+  <url>
+    <loc>https://15pkt.pages.dev/abiturrechner/</loc>
+    <changefreq>monthly</changefreq>
+  </url>
+  <url>
+    <loc>https://15pkt.pages.dev/bundesland/baden-wuerttemberg/</loc>
+    <changefreq>monthly</changefreq>
+  </url>
 </urlset>
