@@ -1,1 +1,18 @@
-node_modules
+# Local environment values
+.env
+.env.*
+!.env.example
+
+# Local credentials and IDE settings
+.vscode/
+*-firebase-adminsdk-*.json
+service-account*.json
+*.pem
+*.p12
+
+# Generated and diagnostic files
+node_modules/
+.astro/
+dist/
+artifacts/
+check-*.txt
