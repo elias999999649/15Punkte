@@ -233,9 +233,8 @@ type FirebaseApi = typeof import("../lib/firebase");
 
 function BrandMark() {
   return (
-    <div className="brand-mark" aria-hidden="true">
-      <span>15</span>
-      <i />
+    <div className="brand-mark" aria-hidden="true" style={{ background: 'transparent', overflow: 'hidden' }}>
+      <img src="/faviconandlogo.jpg" alt="" style={{ width: '100%', height: '100%', borderRadius: '11px', objectFit: 'cover' }} />
     </div>
   );
 }

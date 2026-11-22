@@ -10,7 +10,7 @@
 :root[data-theme='sepia'] { color-scheme: light; --bg: #f5f0e6; --surface: #fbf8f0; --surface-2: #f7f2e9; --surface-hover: #eee7db; --text: #514a40; --text-strong: #352f27; --muted: #958b7d; --subtle: #aa9f90; --line: #e9e1d4; --line-strong: #ded4c4; --accent: #806247; --accent-hover: #6e513b; --accent-soft: #eee5da; --shadow: 0 1px 2px rgba(62, 48, 30, .025), 0 8px 24px rgba(62, 48, 30, .035); --sidebar: #faf6ed; --good: #53745b; --good-bg: #e8eee4; --mid: #9b7625; --mid-bg: #f5edd8; --low: #a85748; --low-bg: #f4e7df; }
 * { box-sizing: border-box; }
 html { min-width: 360px; background: var(--bg); scroll-behavior: smooth; }
-body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Google Sans Flex', 'Segoe UI', sans-serif; font-size: 16px; -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Google Sans Flex', 'Segoe UI', sans-serif; font-size: 17.5px; -webkit-font-smoothing: antialiased; }
 button, input, select { font-size: inherit; }
 button, input, select { font: inherit; } button { color: inherit; } button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 28%, transparent); outline-offset: 2px; }
 .app-shell { min-height: 100vh; }
@@ -253,18 +253,18 @@ h1 span { color: var(--muted); font-weight: 400; }
 .toast svg { color: #80c7a3; }
 @media (min-width: 1500px) { .content-wrap { padding-top: 52px; } }
 /* Comfortable, readable defaults across the compact dashboard components. */
-.nav-item { font-size: 14px; height: 44px; }
-.content-wrap { max-width: 1240px; padding-top: 52px; }
-.page-heading p { font-size: 15px; line-height: 1.6; }
-.button { font-size: 13px; min-height: 42px; padding-left: 16px; padding-right: 16px; }
-.metric-top { font-size: 12px; }
-.metric-foot { font-size: 11px; }
-.panel-heading h2, .settings-section-title h2 { font-size: 16px; }
-.panel-heading p, .settings-section-title p { font-size: 13px; }
-.grades-table th { font-size: 10px; }
-.grades-table td, .subject-name, .table-average { font-size: 13px; }
-.form-label { font-size: 13px; }
-.form-label input, .form-label select { font-size: 14px; min-height: 46px; }
+.nav-item { font-size: 15px; height: 46px; }
+.content-wrap { max-width: 1260px; padding-top: 52px; }
+.page-heading p { font-size: 16px; line-height: 1.6; }
+.button { font-size: 14px; min-height: 44px; padding-left: 18px; padding-right: 18px; }
+.metric-top { font-size: 13px; }
+.metric-foot { font-size: 12px; }
+.panel-heading h2, .settings-section-title h2 { font-size: 17px; }
+.panel-heading p, .settings-section-title p { font-size: 14px; }
+.grades-table th { font-size: 11px; }
+.grades-table td, .subject-name, .table-average { font-size: 14px; }
+.form-label { font-size: 14px; }
+.form-label input, .form-label select { font-size: 15px; min-height: 48px; }
 .add-modal { max-width: 500px; padding: 28px; }
 .extended-modal { max-width: 600px; }
 @media (max-width: 600px) {
