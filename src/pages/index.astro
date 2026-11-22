@@ -12,8 +12,8 @@ const structuredData = {
   operatingSystem: 'Web',
   url: websiteUrl,
   inLanguage: 'de-DE',
-  description: 'Lokaler Notenmanager mit Statistiken, Zielnoten, gewichteter Prognose und versionierten Abiturregeln für das allgemeinbildende Gymnasium in Baden-Württemberg.',
-  featureList: ['Fach- und Halbjahresschnitte', 'Notenstatistiken', 'Zielnoten', 'Prognose zukünftiger Leistungen', 'Lokaler JSON-Export und Import', 'Abiturregelwerk Baden-Württemberg'],
+  description: 'Kostenloser Notenmanager fürs Abi: Oberstufen-Noten, Fächer, Halbjahresschnitte und Abitur 2028 für Baden-Württemberg – lokal und ohne Konto.',
+  featureList: ['Oberstufen-Noten und Fächer verwalten', 'Noten nach Halbjahr eintragen', 'Fachschnitte und Notendurchschnitt berechnen', 'Notenstatistiken und Zielnoten', 'Persönliche Abiturprognose', 'Abiturregelwerk Baden-Württemberg 2028', 'Lokaler JSON-Export und Import'],
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'EUR' },
 };
 const aboutSchema = {
@@ -36,8 +36,8 @@ const faqSchema = {
 };
 const jsonLd = (schema: object) => JSON.stringify(schema).replace(/</g, '\\u003c');
 
-const title = '15Punkte — Dein Abi. Im Überblick.';
-const description = 'Dein ruhiger Überblick über Noten, Fächer und Abitur. Für die gymnasiale Oberstufe in Baden-Württemberg.';
+const title = 'Notenmanager fürs Abi – Noten & Fächer im Blick | 15Punkte';
+const description = 'Mit dem kostenlosen Notenmanager 15Punkte trägst du Oberstufen-Noten einfach ein, berechnest Fach- und Halbjahresschnitte und planst dein Abi in Baden-Württemberg.';
 ---
 <!doctype html>
 <html lang="de">
@@ -47,17 +47,22 @@ const description = 'Dein ruhiger Überblick über Noten, Fächer und Abitur. F�
     <meta name="google-site-verification" content="rylsW5TzohyKjKDfX8PxnMCWazZkitUeJoBjVg65Ayw" />
     <meta name="theme-color" content="#f7f8fa" />
     <meta name="description" content={description} />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta property="og:locale" content="de_DE" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="15Punkte" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={websiteUrl} />
     <meta name="twitter:card" content="summary" />
-    <link rel="canonical" href={websiteUrl} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <link rel="canonical" href={`${websiteUrl}/`} />
     <script type="application/ld+json" set:html={jsonLd(structuredData)} />
     <script type="application/ld+json" set:html={jsonLd(aboutSchema)} />
     <script type="application/ld+json" set:html={jsonLd(faqSchema)} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
     <link rel="preload" href="/fonts/GoogleSansFlex-Regular.ttf" as="font" type="font/ttf" crossorigin />
     <title>{title}</title>
   </head>

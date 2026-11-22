@@ -512,7 +512,14 @@ export default function App() {
   );
 }
 
-: {
+function _LegacyDashboard({
+  subjects,
+  average,
+  onAdd,
+  onOpenSubjects,
+  onOpenAbi,
+  onEditGrade,
+}: {
   subjects: Subject[];
   average: number;
   onAdd: () => void;
@@ -762,11 +769,7 @@ export default function App() {
   );
 }
 
-: {
-  subjects: Subject[];
-  onAdd: () => void;
-  onEditGrade: (name: string) => void;
-}) {
+function _LegacySubjectsPage({ subjects, onAdd, onEditGrade }: { subjects: Subject[]; onAdd: () => void; onEditGrade: (name: string) => void }) {
   const [query, setQuery] = useState("");
   const filtered = subjects.filter((subject) =>
     subject.name.toLowerCase().includes(query.toLowerCase()),
@@ -896,7 +899,7 @@ export default function App() {
   );
 }
 
-: { average: number }) {
+function LegacyAbiturPage({ average }: { average: number }) {
   const estimate = Math.round(average * 40);
   return (
     <>
@@ -985,11 +988,7 @@ export default function App() {
   );
 }
 
-: {
-  theme: Theme;
-  onTheme: (theme: Theme) => void;
-  onReset: () => void;
-}) {
+function LegacySettingsPage({ theme, onTheme, onReset }: { theme: Theme; onTheme: (theme: Theme) => void; onReset: () => void }) {
   const themes: {
     id: Theme;
     label: string;
@@ -1187,7 +1186,7 @@ function GradeModal({ subject, onClose, onSave }: { subject: Subject; onClose: (
 }
 
 
-: { subjects: SchoolSubject[]; performances: Performance[]; average: number; performanceCount: number; onAddGrade: () => void; onOpenSubjects: () => void; onShowCalculation: () => void }) {
+function Dashboard({ subjects, performances, average, performanceCount, onAddGrade, onOpenSubjects }: { subjects: SchoolSubject[]; performances: Performance[]; average: number; performanceCount: number; onAddGrade: () => void; onOpenSubjects: () => void }) {
   const semesterResults = SEMESTERS.map((semester) => ({ semester, ...calculateSemester({ version: 1, subjects, performances }, semester) }));
   const latest = [...semesterResults].reverse().find((item) => item.average !== null);
   const ranked = (latest?.results ?? []).slice().sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
@@ -1203,7 +1202,7 @@ function GradeModal({ subject, onClose, onSave }: { subject: Subject; onClose: (
   </>;
 }
 
-: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, written: number, oral: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
+function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit, onDelete, onGrade, onWeights, onMode, onPerformanceEdit, onPerformanceDelete }: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, written: number, oral: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const filtered = subjects.filter((subject) => `${subject.name} ${subject.code}`.toLowerCase().includes(query.toLowerCase()));
@@ -1227,7 +1226,7 @@ function GradeModal({ subject, onClose, onSave }: { subject: Subject; onClose: (
   </>;
 }
 
-: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
+function AreaSummary({ title, result, weight, onWeight }function AreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
   return <div className="area-summary"><div className="area-summary-heading"><div><span>{title}</span><strong>{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></strong></div><span className="course-tag">{result.count} Leistungen</span></div><label>Bereichsgewicht <input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => onWeight(Math.max(0, Number(event.target.value)))} />×</label><small>Rechenfaktor {result.denominator.toFixed(2).replace(".", ",")}</small></div>;
 }
 
@@ -1271,7 +1270,7 @@ function CalculationModal({ result, semester, onClose }: { result: ReturnType<ty
 }
 
 
-: { data: GradebookData; onAddCourse: () => void }) {
+function OfficialCalculatorPage({ data, onAddCourse }: { data: GradebookData; onAddCourse: () => void }) {
   const [courses, setCourses] = useState<AbiturCourseGrade[]>(() => data.subjects.flatMap((subject) => SEMESTERS.map((semester) => { const result = calculateSubject(subject, data.performances, semester); return { subjectId: subject.id, subjectName: subject.name, semester, points: result.average === null ? null : Math.round(result.average), courseType: subject.courseType, compulsory: false, excluded: false }; })));
   const [exams, setExams] = useState<ExamSubject[]>(() => Array.from({ length: 5 }, (_, index) => ({ subjectId: data.subjects[index]?.id ?? `exam-${index + 1}`, subjectName: data.subjects[index]?.name ?? `Prüfungsfach ${index + 1}`, points: null, written: index < 3, oral: index >= 3 })));
   const [confirmedEligible, setConfirmedEligible] = useState(false);
