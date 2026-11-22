@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validGradebook(document) {
+      return document.keys().hasOnly([
+          'app',
+          'schemaVersion',
+          'data',
+          'goals',
+          'preferences'
+        ])
+        && document.app == '15punkte'
+        && document.schemaVersion == 2
+        && document.data is map
+        && document.data.keys().hasOnly(['version', 'subjects', 'performances'])
+        && document.data.version == 1
+        && document.data.subjects is list
+        && document.data.subjects.size() <= 100
+        && document.data.performances is list
+        && document.data.performances.size() <= 2000
+        && document.goals is list
+        && document.goals.size() <= 100
+        && document.preferences is map
+        && document.preferences.keys().hasOnly([
+          'state',
+          'schoolType',
+          'schoolYear',
+          'currentSemester',
+          'theme'
+        ])
+        && document.preferences.state is string
+        && document.preferences.schoolType is string
+        && document.preferences.schoolYear is string
+        && document.preferences.currentSemester is int
+        && document.preferences.theme in ['light', 'dark', 'sepia'];
+    }
+
+    match /users/{userId}/gradebook/{documentId} {
+      allow read, delete: if isOwner(userId) && documentId == 'current';
+      allow create, update: if isOwner(userId)
+        && documentId == 'current'
+        && validGradebook(request.resource.data);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

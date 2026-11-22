@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Auth, User } from "firebase/auth";
+import type { Firestore, Unsubscribe } from "firebase/firestore";
 import {
   ArrowDownRight,
   ArrowRight,
@@ -28,8 +30,8 @@ import {
 } from "lucide-react";
 import { Dashboard } from "./Dashboard";
 import { GradeEntryModal } from "./GradeEntryModal";
-import { ConfirmAction, ConfirmDelete } from "./DataDialogs";
 import { CalculationDialog } from "./CalculationDialog";
+import { FirebaseAccountPanel, type CloudStatus } from "./FirebaseAccountPanel";
 import {
   calculateOverall,
   calculateSemester,
@@ -171,6 +173,64 @@ const navItems: { label: Section; icon: typeof LayoutDashboard }[] = [
 const formatGrade = (grade: number | null) =>
   grade === null ? "—" : `${grade}`;
 
+function readLocalDocument(): import("../lib/gradebook").GradebookDocument | null {
+  const stored = localStorage.getItem("15punkte-gradebook-v2");
+  if (stored) {
+    try {
+      const validation = validateGradebookDocument(JSON.parse(stored));
+      if (validation.ok) return validation.document;
+    } catch {
+      return null;
+    }
+  }
+  if (
+    localStorage.getItem("15punkte-gradebook-v1") ||
+    localStorage.getItem("15punkte-subjects")
+  ) {
+    return createDocument(loadGradebook(), emptyGoals(), defaultPreferences());
+  }
+  return null;
+}
+
+function hasMeaningfulLocalData(
+  document: import("../lib/gradebook").GradebookDocument | null,
+) {
+  if (!document) return false;
+  return (
+    document.data.subjects.length > 0 ||
+    document.data.performances.length > 0 ||
+    document.goals.length > 0 ||
+    JSON.stringify(document.preferences) !== JSON.stringify(defaultPreferences())
+  );
+}
+
+function errorMessage(error: unknown) {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String(error.code)
+      : "";
+  if (code === "auth/unauthorized-domain") {
+    return "Diese Domain ist in Firebase Authentication nicht freigegeben. Füge sie in der Firebase Console unter Authentication → Einstellungen → Autorisierte Domains hinzu.";
+  }
+  if (code === "auth/popup-blocked") {
+    return "Das Anmelde-Popup wurde blockiert. Erlaube Pop-ups für diese Website und versuche es erneut.";
+  }
+  if (code === "auth/popup-closed-by-user") {
+    return "Die Google-Anmeldung wurde geschlossen, bevor sie abgeschlossen war.";
+  }
+  if (code === "auth/network-request-failed") {
+    return "Keine Verbindung zu Firebase. Prüfe deine Internetverbindung und versuche es erneut.";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "Google-Anmeldung ist in Firebase Authentication noch nicht aktiviert.";
+  }
+  return error instanceof Error
+    ? error.message
+    : "Ein unbekannter Fehler ist aufgetreten.";
+}
+
+type FirebaseApi = typeof import("../lib/firebase");
+
 function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
@@ -212,12 +272,27 @@ function Trend({ trend }: { trend: Subject["trend"] }) {
 export default function App() {
   const [section, setSection] = useState<Section>("Dashboard");
   const [theme, setTheme] = useState<Theme>("light");
-  const [gradebook, setGradebook] = useState<GradebookData>(() => exampleGradebook());
+  const [gradebook, setGradebook] = useState<GradebookData>(emptyGradebook);
   const [goals, setGoals] = useState<UserGoal[]>(emptyGoals);
   const [preferences, setPreferences] = useState<AppPreferences>(defaultPreferences);
   const [hasUnsavedWarning, setHasUnsavedWarning] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const skipFirstSave = useRef(true);
+  const localDocument = useRef<import("../lib/gradebook").GradebookDocument | null>(null);
+  const firebaseServices = useRef<{ auth: Auth; db: Firestore } | null>(null);
+  const firebaseApi = useRef<FirebaseApi | null>(null);
+  const lastCloudDocument = useRef<string | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [guestReady, setGuestReady] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>("loading");
+  const [cloudDataExists, setCloudDataExists] = useState(false);
+  const [localMigrationAvailable, setLocalMigrationAvailable] = useState(false);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const [syncAttempt, setSyncAttempt] = useState(0);
+  const [pendingCloudImport, setPendingCloudImport] = useState(false);
+  const [pendingAccountDelete, setPendingAccountDelete] = useState(false);
   const [showSubject, setShowSubject] = useState(false);
   const [editingSubject, setEditingSubject] = useState<string | null>(null);
   const [gradeTarget, setGradeTarget] = useState<{ subjectId?: string; performance?: Performance; semester?: Semester; manual?: boolean } | null>(null);
@@ -238,35 +313,234 @@ export default function App() {
   const performances = gradebook.performances;
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("15punkte-theme") as Theme | null;
-    if (savedTheme && ["light", "dark", "sepia"].includes(savedTheme)) setTheme(savedTheme);
-    const stored = localStorage.getItem("15punkte-gradebook-v2");
-    if (stored) {
+    let active = true;
+    let authSubscription: Unsubscribe | undefined;
+    let documentSubscription: Unsubscribe | undefined;
+    let sessionVersion = 0;
+
+    const restoreGuestData = () => {
+      const saved = readLocalDocument();
+      localDocument.current = saved;
+      if (saved) {
+        setGradebook(saved.data);
+        setGoals(saved.goals);
+        setPreferences(saved.preferences);
+        setTheme(saved.preferences.theme);
+        setSelectedSemester(saved.preferences.currentSemester);
+      } else {
+        setGradebook(loadGradebook());
+        setGoals(emptyGoals());
+        setPreferences(defaultPreferences());
+        setSelectedSemester(defaultPreferences().currentSemester);
+        const savedTheme = localStorage.getItem("15punkte-theme") as Theme | null;
+        if (savedTheme && ["light", "dark", "sepia"].includes(savedTheme)) {
+          setTheme(savedTheme);
+        } else {
+          setTheme("light");
+        }
+      }
+      const stored = localStorage.getItem("15punkte-gradebook-v2");
+      if (stored) {
+        try {
+          if (!validateGradebookDocument(JSON.parse(stored)).ok) {
+            setHasUnsavedWarning(true);
+          }
+        } catch {
+          setHasUnsavedWarning(true);
+        }
+      }
+      setGuestReady(true);
+    };
+
+    restoreGuestData();
+
+    const startFirebase = async () => {
       try {
-        const result = validateGradebookDocument(JSON.parse(stored));
-        if (result.ok) { setGradebook(result.document.data); setGoals(result.document.goals); setPreferences(result.document.preferences); setTheme(result.document.preferences.theme); }
-        else { setGradebook(loadGradebook()); setHasUnsavedWarning(true); }
-      } catch { setGradebook(loadGradebook()); setHasUnsavedWarning(true); }
-    } else setGradebook(loadGradebook());
+        const api = await import("../lib/firebase");
+        const services = await api.initializeFirebase();
+        if (!active) return;
+        firebaseApi.current = api;
+        firebaseServices.current = services;
+        authSubscription = api.watchAuthentication(
+          (user) => {
+            const currentSession = ++sessionVersion;
+            documentSubscription?.();
+            documentSubscription = undefined;
+            setAuthUser(user);
+            setAuthReady(true);
+            setAccountError("");
+
+            if (!user) {
+              setGuestReady(false);
+              setCloudReady(false);
+              setCloudDataExists(false);
+              setLocalMigrationAvailable(false);
+              lastCloudDocument.current = null;
+              restoreGuestData();
+              setCloudStatus("guest");
+              return;
+            }
+
+            setGuestReady(false);
+            setCloudReady(false);
+            setCloudStatus("loading");
+            let firstSnapshot = true;
+            documentSubscription = api.watchUserGradebook(
+              services.db,
+              user.uid,
+              (remoteDocument) => {
+                if (!active || currentSession !== sessionVersion) return;
+                if (!remoteDocument) {
+                  setCloudDataExists(false);
+                  lastCloudDocument.current = null;
+                  if (hasMeaningfulLocalData(localDocument.current)) {
+                    setLocalMigrationAvailable(true);
+                    setCloudStatus("migration");
+                    setCloudReady(false);
+                  } else {
+                    const empty = createDocument(
+                      emptyGradebook(),
+                      emptyGoals(),
+                      defaultPreferences(),
+                    );
+                    setGradebook(empty.data);
+                    setGoals(empty.goals);
+                    setPreferences(empty.preferences);
+                    setTheme(empty.preferences.theme);
+                    setSelectedSemester(empty.preferences.currentSemester);
+                    setLocalMigrationAvailable(false);
+                    setCloudReady(true);
+                    setCloudStatus("syncing");
+                  }
+                  firstSnapshot = false;
+                  return;
+                }
+
+                const validation = validateGradebookDocument(remoteDocument);
+                if (!validation.ok) {
+                  setCloudStatus("error");
+                  setCloudReady(false);
+                  setAccountError(`Cloud-Daten sind ungültig: ${validation.error}`);
+                  firstSnapshot = false;
+                  return;
+                }
+                const document = validation.document;
+                const canonical = createDocument(
+                  document.data,
+                  document.goals,
+                  document.preferences,
+                );
+                const serialized = JSON.stringify(canonical);
+                const savedLocally = localDocument.current;
+                if (
+                  firstSnapshot &&
+                  savedLocally !== null &&
+                  hasMeaningfulLocalData(savedLocally) &&
+                  JSON.stringify(
+                    createDocument(
+                      savedLocally.data,
+                      savedLocally.goals,
+                      savedLocally.preferences,
+                    ),
+                  ) !== serialized
+                ) {
+                  setLocalMigrationAvailable(true);
+                } else if (firstSnapshot) {
+                  setLocalMigrationAvailable(false);
+                }
+                setCloudDataExists(true);
+                lastCloudDocument.current = serialized;
+                setGradebook(document.data);
+                setGoals(document.goals);
+                setPreferences(document.preferences);
+                setTheme(document.preferences.theme);
+                setSelectedSemester(document.preferences.currentSemester);
+                setCloudReady(true);
+                setCloudStatus("saved");
+                firstSnapshot = false;
+              },
+              (error) => {
+                if (!active || currentSession !== sessionVersion) return;
+                setCloudStatus("error");
+                setCloudReady(false);
+                setAccountError(`Cloud-Daten konnten nicht geladen werden: ${error.message}`);
+              },
+            );
+          },
+          (error) => {
+            if (!active) return;
+            setAuthReady(true);
+            setCloudStatus("error");
+            setAccountError(`Firebase-Anmeldung konnte nicht wiederhergestellt werden: ${error.message}`);
+          },
+        );
+      } catch (error) {
+        if (!active) return;
+        setAuthReady(true);
+        setGuestReady(true);
+        setCloudStatus("error");
+        setAccountError(`Firebase konnte nicht initialisiert werden: ${errorMessage(error)}`);
+      }
+    };
+    void startFirebase();
+    return () => {
+      active = false;
+      sessionVersion += 1;
+      authSubscription?.();
+      documentSubscription?.();
+    };
   }, []);
+
   useEffect(() => {
-    if (skipFirstSave.current) {
-      skipFirstSave.current = false;
-      return;
-    }
+    if (!authReady || !guestReady || authUser) return;
     const document = createDocument(gradebook, goals, { ...preferences, theme });
     try {
       localStorage.setItem("15punkte-gradebook-v2", JSON.stringify(document));
+      localDocument.current = document;
       setHasUnsavedWarning(false);
     } catch {
       setHasUnsavedWarning(true);
     }
-  }, [gradebook, goals, preferences, theme]);
+  }, [gradebook, goals, preferences, theme, authReady, guestReady, authUser]);
+
+  useEffect(() => {
+    const services = firebaseServices.current;
+    const api = firebaseApi.current;
+    if (!authUser || !cloudReady || !services || !api) return;
+    const document = createDocument(gradebook, goals, { ...preferences, theme });
+    const serialized = JSON.stringify(document);
+    if (serialized === lastCloudDocument.current) return;
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setCloudStatus("syncing");
+      void api.saveUserGradebook(services.db, authUser.uid, document)
+        .then(() => {
+          if (!active) return;
+          lastCloudDocument.current = serialized;
+          setCloudDataExists(true);
+          setCloudStatus("saved");
+          setAccountError("");
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          setCloudStatus("error");
+          setAccountError(`Cloud-Speichern fehlgeschlagen: ${errorMessage(error)}`);
+        });
+    }, 500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [gradebook, goals, preferences, theme, authUser, cloudReady, syncAttempt]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("15punkte-theme", theme);
+    if (authReady && guestReady && !authUser) {
+      localStorage.setItem("15punkte-theme", theme);
+    }
     setPreferences((current) => current.theme === theme ? current : { ...current, theme });
-  }, [theme]);
+  }, [theme, authReady, guestReady, authUser]);
 
   const overall = useMemo(() => calculateOverall(gradebook), [gradebook]);
   const semesterResult = useMemo(() => calculateSemester(gradebook, selectedSemester), [gradebook, selectedSemester]);
@@ -276,11 +550,16 @@ export default function App() {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
   };
-  const downloadBackup = () => {
-    const text = exportGradebook(createDocument(gradebook, goals, { ...preferences, theme }));
+  const downloadDocumentBackup = (
+    backup: import("../lib/gradebook").GradebookDocument,
+  ) => {
+    const text = exportGradebook(backup);
     const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = `15punkte-backup-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url);
+  };
+  const downloadBackup = () => {
+    downloadDocumentBackup(createDocument(gradebook, goals, { ...preferences, theme }));
   };
   const importBackup = async (file?: File) => {
     if (!file) return;
@@ -294,10 +573,107 @@ export default function App() {
   };
   const confirmImport = () => {
     if (!pendingImport) return;
-    setGradebook(pendingImport.data); setGoals(pendingImport.goals); setPreferences(pendingImport.preferences); setTheme(pendingImport.preferences.theme); setSelectedSemester(pendingImport.preferences.currentSemester); setPendingImport(null); notify("Backup importiert und lokal gespeichert.");
+    setGradebook(pendingImport.data); setGoals(pendingImport.goals); setPreferences(pendingImport.preferences); setTheme(pendingImport.preferences.theme); setSelectedSemester(pendingImport.preferences.currentSemester); setPendingImport(null); notify(authUser ? "Backup importiert; Synchronisierung läuft." : "Backup importiert und lokal gespeichert.");
   };
   const confirmReset = () => {
-    setGradebook(emptyGradebook()); setGoals([]); setPreferences(defaultPreferences()); setTheme("light"); setSelectedSemester(1); localStorage.removeItem("15punkte-gradebook-v1"); localStorage.removeItem("15punkte-gradebook-v2"); localStorage.removeItem("15punkte-subjects"); setPendingReset(false); notify("Alle Noten und Ziele wurden zurückgesetzt.");
+    setGradebook(emptyGradebook()); setGoals([]); setPreferences(defaultPreferences()); setTheme("light"); setSelectedSemester(1); localDocument.current = null; setLocalMigrationAvailable(false); localStorage.removeItem("15punkte-gradebook-v1"); localStorage.removeItem("15punkte-gradebook-v2"); localStorage.removeItem("15punkte-subjects"); setPendingReset(false); notify("Alle Noten und Ziele wurden zurückgesetzt.");
+  };
+  const handleGoogleSignIn = async () => {
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      const api = firebaseApi.current;
+      if (!api) throw new Error("Firebase ist noch nicht bereit. Lade die Seite neu.");
+      await api.signInWithGoogle();
+    } catch (error) {
+      setAccountError(errorMessage(error));
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+  const handleGoogleSignOut = async () => {
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      const api = firebaseApi.current;
+      if (!api) throw new Error("Firebase ist noch nicht bereit. Lade die Seite neu.");
+      await api.signOutFromGoogle();
+      notify("Du wurdest abgemeldet. Deine Gastdaten bleiben auf diesem Gerät.");
+    } catch (error) {
+      setAccountError(`Abmelden fehlgeschlagen: ${errorMessage(error)}`);
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+  const confirmLocalCloudImport = async () => {
+    const saved = localDocument.current;
+    const services = firebaseServices.current;
+    const api = firebaseApi.current;
+    if (!saved || !authUser || !services || !api) return;
+    const document = createDocument(saved.data, saved.goals, saved.preferences);
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      if (cloudDataExists) {
+        downloadBackup();
+      }
+      await api.saveUserGradebook(services.db, authUser.uid, document);
+      lastCloudDocument.current = JSON.stringify(document);
+      setGradebook(document.data);
+      setGoals(document.goals);
+      setPreferences(document.preferences);
+      setTheme(document.preferences.theme);
+      setSelectedSemester(document.preferences.currentSemester);
+      setCloudDataExists(true);
+      setCloudReady(true);
+      setCloudStatus("saved");
+      setLocalMigrationAvailable(false);
+      setPendingCloudImport(false);
+      notify(
+        cloudDataExists
+          ? "Lokale Daten übernommen. Die bisherige Cloud-Sicherung wurde heruntergeladen."
+          : "Lokale Daten wurden in dein Konto übernommen.",
+      );
+    } catch (error) {
+      setCloudStatus("error");
+      setAccountError(`Datenübernahme fehlgeschlagen: ${errorMessage(error)}`);
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+  const keepCurrentCloudData = () => {
+    setLocalMigrationAvailable(false);
+    setPendingCloudImport(false);
+    if (cloudDataExists) {
+      setCloudReady(true);
+      setCloudStatus("saved");
+      return;
+    }
+    const empty = createDocument(emptyGradebook(), emptyGoals(), defaultPreferences());
+    lastCloudDocument.current = null;
+    setGradebook(empty.data);
+    setGoals(empty.goals);
+    setPreferences(empty.preferences);
+    setTheme(empty.preferences.theme);
+    setSelectedSemester(empty.preferences.currentSemester);
+    setCloudReady(true);
+    setCloudStatus("syncing");
+  };
+  const confirmAccountDelete = async () => {
+    const services = firebaseServices.current;
+    const api = firebaseApi.current;
+    if (!authUser || !services || !api) return;
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      await api.deleteGoogleAccount(authUser, services.db);
+      setPendingAccountDelete(false);
+      notify("Dein Konto und die zugehörigen Cloud-Daten wurden gelöscht.");
+    } catch (error) {
+      setAccountError(`Konto konnte nicht gelöscht werden: ${errorMessage(error)}`);
+    } finally {
+      setAccountBusy(false);
+    }
   };
   const savePerformance = (performance: Performance) => {
     setGradebook((current) => ({ ...current, performances: [...current.performances.filter((item) => item.id !== performance.id), performance] }));
@@ -416,18 +792,20 @@ export default function App() {
               <Check size={13} />
             </div>
             <div>
-              <strong>Deine Daten bleiben bei dir.</strong>
-              <span>Nur auf diesem Gerät gespeichert.</span>
+              <strong>{authUser ? "Cloud-Synchronisierung aktiv." : "Gastmodus aktiv."}</strong>
+              <span>{authUser ? "Nur für dein Konto zugänglich." : "Daten bleiben auf diesem Gerät."}</span>
             </div>
           </div>
           <button
             className="profile-button"
             onClick={() => setSection("Einstellungen")}
           >
-            <span className="profile-avatar">E</span>
+            <span className="profile-avatar">
+              {authUser?.displayName?.charAt(0) ?? authUser?.email?.charAt(0) ?? "G"}
+            </span>
             <span className="profile-copy">
-              <strong>Abiturjahrgang 2028</strong>
-              <small>Regelwerk versioniert</small>
+              <strong>{authUser?.displayName ?? authUser?.email ?? "Gastmodus"}</strong>
+              <small>{authUser ? "Google-Konto" : "Ohne Anmeldung"}</small>
             </span>
             <MoreHorizontal size={17} className="muted-icon" />
           </button>
@@ -470,10 +848,10 @@ export default function App() {
             </button>
             <button
               className="avatar-button"
-              aria-label="Einstellungen öffnen"
+              aria-label={authUser ? "Konto-Einstellungen öffnen" : "Anmelden und Einstellungen öffnen"}
               onClick={() => setSection("Einstellungen")}
             >
-              E
+              {authUser?.displayName?.charAt(0) ?? authUser?.email?.charAt(0) ?? "G"}
             </button>
           </div>
         </header>
@@ -486,7 +864,7 @@ export default function App() {
           {section === "Abitur" && <AbiturPage average={average} />}
           {section === "Regeln" && <RulesPage />}
           {section === "Rechner" && <OfficialCalculatorPage data={gradebook} onAddCourse={() => setShowSubject(true)} />}
-          {section === "Einstellungen" && <SettingsPage theme={theme} onTheme={setTheme} preferences={preferences} onPreferences={(next) => { setPreferences(next); setSelectedSemester(next.currentSemester); setTheme(next.theme); }} onExport={downloadBackup} onImport={() => fileInput.current?.click()} onReset={() => setPendingReset(true)} saveWarning={hasUnsavedWarning} /> }
+          {section === "Einstellungen" && <SettingsPage theme={theme} onTheme={setTheme} preferences={preferences} onPreferences={(next) => { setPreferences(next); setSelectedSemester(next.currentSemester); setTheme(next.theme); }} onExport={downloadBackup} onImport={() => fileInput.current?.click()} onReset={() => setPendingReset(true)} saveWarning={hasUnsavedWarning} accountProps={{ user: authUser, authReady, busy: accountBusy, status: cloudStatus, error: accountError, migrationAvailable: localMigrationAvailable, cloudDataExists, onSignIn: () => void handleGoogleSignIn(), onSignOut: () => void handleGoogleSignOut(), onDeleteAccount: () => setPendingAccountDelete(true), onImportLocal: () => setPendingCloudImport(true), onKeepCurrent: keepCurrentCloudData,           onRetrySync: () => cloudReady ? setSyncAttempt((value) => value + 1) : window.location.reload() }} /> }
           <footer className="page-footer">
             <span>Mit Ruhe zum Ziel.</span>
             <span>
@@ -501,6 +879,8 @@ export default function App() {
       {showCalculation && <CalculationDialog result={semesterResult} semester={selectedSemester} onClose={() => setShowCalculation(false)} />}
       {pendingImport && <ConfirmAction title="Backup importieren?" message="Deine aktuell gespeicherten Daten werden durch den validierten Inhalt der JSON-Datei ersetzt. Dieser Vorgang kann nicht automatisch rückgängig gemacht werden." confirmLabel="Importieren und ersetzen" onCancel={() => setPendingImport(null)} onConfirm={confirmImport} />}
       {pendingReset && <ConfirmAction title="Alle persönlichen Daten löschen?" message="Alle Fächer, Leistungen, Ziele und Einstellungen werden unwiderruflich aus diesem Browser entfernt. Exportiere vorher ein Backup, falls du die Daten behalten möchtest." confirmLabel="Alle Daten löschen" onCancel={() => setPendingReset(false)} onConfirm={confirmReset} />}
+      {pendingCloudImport && <ConfirmAction title={cloudDataExists ? "Cloud-Daten ersetzen?" : "Lokale Sicherung übernehmen?"} message={cloudDataExists ? "Die vorhandenen Cloud-Daten werden durch die lokale Sicherung ersetzt. Vorher wird die aktuelle Cloud-Sicherung als JSON heruntergeladen. Fahre nur fort, wenn du diese Änderung möchtest." : "Deine lokale Sicherung wird in dein Google-Konto kopiert. Sie bleibt zusätzlich als Gastdaten auf diesem Gerät erhalten."} confirmLabel="Lokale Daten übernehmen" onCancel={() => setPendingCloudImport(false)} onConfirm={() => void confirmLocalCloudImport()} />}
+      {pendingAccountDelete && <ConfirmAction title="Google-Konto und Cloud-Daten löschen?" message="Das Notenbuch in Firestore und dein Firebase-Anmeldekonto werden dauerhaft gelöscht. Deine getrennt gespeicherten Gastdaten auf diesem Gerät bleiben erhalten. Zur Bestätigung wirst du möglicherweise erneut bei Google angemeldet." confirmLabel="Konto endgültig löschen" onCancel={() => setPendingAccountDelete(false)} onConfirm={() => void confirmAccountDelete()} />}
       {hasUnsavedWarning && <div className="storage-warning" role="alert">Speichern im Browser ist fehlgeschlagen oder der gespeicherte Datenstand war ungültig. Exportiere deine Daten als Backup.</div>}
       {toast && (
         <div className="toast" role="status">
@@ -1186,7 +1566,7 @@ function GradeModal({ subject, onClose, onSave }: { subject: Subject; onClose: (
 }
 
 
-function Dashboard({ subjects, performances, average, performanceCount, onAddGrade, onOpenSubjects }: { subjects: SchoolSubject[]; performances: Performance[]; average: number; performanceCount: number; onAddGrade: () => void; onOpenSubjects: () => void }) {
+function _LegacyDashboardDuplicate({ subjects, performances, average, performanceCount, onAddGrade, onOpenSubjects }: { subjects: SchoolSubject[]; performances: Performance[]; average: number; performanceCount: number; onAddGrade: () => void; onOpenSubjects: () => void }) {
   const semesterResults = SEMESTERS.map((semester) => ({ semester, ...calculateSemester({ version: 1, subjects, performances }, semester) }));
   const latest = [...semesterResults].reverse().find((item) => item.average !== null);
   const ranked = (latest?.results ?? []).slice().sort((a, b) => (b.average ?? 0) - (a.average ?? 0));
@@ -1226,7 +1606,7 @@ function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit
   </>;
 }
 
-function AreaSummary({ title, result, weight, onWeight }function AreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
+function AreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
   return <div className="area-summary"><div className="area-summary-heading"><div><span>{title}</span><strong>{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></strong></div><span className="course-tag">{result.count} Leistungen</span></div><label>Bereichsgewicht <input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => onWeight(Math.max(0, Number(event.target.value)))} />×</label><small>Rechenfaktor {result.denominator.toFixed(2).replace(".", ",")}</small></div>;
 }
 
@@ -1318,7 +1698,7 @@ function _OldOfficialCalculatorPage2a({ data, onAddCourse }: { data: GradebookDa
 }
 
 
-function _DuplicateRulesPage2a() {
+function RulesPage() {
   const rules = BW_ABITUR_2028_RULES;
   return <><section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> REGELWERK · ABITURJAHRGANG 2028</div><h1>Regeln. <span>Mit Quellen.</span></h1><p>Jahrgangsbezogene Orientierung für das allgemeinbildende Gymnasium in Baden-Württemberg.</p></div><a className="button button-quiet" href={rules.sources[0].url} target="_blank" rel="noreferrer">Amtlichen Leitfaden öffnen <ArrowRight size={14} /></a></section><div className="model-notice"><CircleHelp size={14} /><span><strong>Keine verbindliche Zulassungsentscheidung.</strong> Maßgeblich sind die für deinen Jahrgang geltende AGVO und die Auskunft deiner Schule.</span></div><section className="rules-summary"><div className="panel rules-intro"><span className="eyebrow small-eyebrow">PRÜFUNGSORDNUNG</span><h2>{rules.schoolType}</h2><p>{rules.examinationOrder}</p><div className="rules-meta"><span>Geltungsbezug</span><strong>Abitur 2028 · Kursstufe 2025–2028</strong></div><div className="rules-meta"><span>Regelstand geprüft</span><strong>21. November 2026 · {rules.rulesetVersion}</strong></div><p className="grade-scale">Einführungsphase: Orientierung und Kurswahl vor Eintritt in die Qualifikationsphase. Qualifikationsphase: vier Kurshalbjahre. Belegpflichten und Zulassung müssen schülerbezogen bestätigt werden.</p></div><div className="panel block-cards"><div><span>BLOCK I</span><strong>40 <small>Kurse</small></strong><p>12 Leistungskurs-Halbjahre doppelt + 28 weitere Kurse einfach, Faktor 40/48. Max. 600 Punkte.</p></div><div><span>BLOCK II</span><strong>5 <small>Prüfungen</small></strong><p>Drei schriftliche Prüfungsfächer; fünf Prüfungsergebnisse jeweils vierfach. Max. 300 Punkte.</p></div><div><span>GESAMTQUALIFIKATION</span><strong>900 <small>Punkte</small></strong><p>Bestehensgrenzen: Block I ≥ 200, Block II ≥ 100 und Gesamt ≥ 300.</p></div></div></section><section className="panel rules-list-panel"><div className="panel-heading"><div><h2>Verifizierte Eckpunkte</h2><p>Aus dem offiziellen Leitfaden für Abitur 2028.</p></div><span className="verified-badge"><Check size={12} /> Quellen dokumentiert</span></div><ul className="rules-facts">{rules.verifiedFacts.map((fact) => <li key={fact}><Check size={14} />{fact}</li>)}</ul></section><section className="panel rules-list-panel"><div className="panel-heading"><div><h2>Offene Prüfbereiche</h2><p>Diese Punkte erfordern individuelle Laufbahn- und Schulangaben.</p></div></div><ul className="rules-facts unresolved-facts">{rules.unresolved.map((fact) => <li key={fact}><CircleHelp size={14} />{fact}</li>)}</ul></section><section className="panel rules-list-panel"><div className="panel-heading"><div><h2>Amtliche Quellen</h2><p>Prüfungsordnung und Jahrgangsleitfaden, geprüft am 21.11.2026.</p></div></div><div className="source-list">{rules.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}><span><strong>{source.label}</strong><small>{source.note}</small></span><ArrowRight size={14} /></a>)}</div></section></>;
 }
@@ -1345,7 +1725,7 @@ function _DashboardOld({ subjects, performances, average, performanceCount, onAd
   return <><section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> DEIN SCHULJAHR · KURSSTUFE</div><h1>Dein Abi. <span>Im Überblick.</span></h1><p>Deine Leistungen, klar und auf einen Blick.</p></div><button className="button button-primary" onClick={onAddGrade}><Plus size={16} /> Leistung eintragen</button></section><div className="model-notice"><Calculator size={14} /><span><strong>Persönliche Modellrechnung</strong> · unverbindlich; keine offizielle schulische Bewertung.</span></div><section className="metric-grid grade-metrics"><article className="metric-card main-metric"><div className="metric-top"><span>Gesamtdurchschnitt</span><TrendingUp size={16} /></div><div className="metric-value">{average ? average.toFixed(2).replace(".", ",") : "–"}<span> Punkte</span></div><div className="metric-foot">Über alle belegten Fächer und Halbjahre gewichtet</div></article><article className="metric-card"><div className="metric-top"><span>Eingetragene Leistungen</span><BookOpen size={16} /></div><div className="metric-value">{performanceCount}<span> Noten</span></div><div className="metric-foot">Einzelnoten in allen Halbjahren</div></article><article className="metric-card"><div className="metric-top"><span>Bestes Fach · {latest ? semesterLabel(latest.semester) : "–"}</span><ArrowUpRight size={16} /></div><div className="metric-value small-metric-value">{rank[0]?.subject.name ?? "Noch offen"}</div><div className="metric-foot">{rank[0]?.average === null || !rank[0] ? "Kein Schnitt vorhanden" : `${rank[0].average.toFixed(2).replace(".", ",")} Punkte`}</div></article><article className="metric-card"><div className="metric-top"><span>Niedrigster Schnitt · {latest ? semesterLabel(latest.semester) : "–"}</span><ArrowDownRight size={16} /></div><div className="metric-value small-metric-value">{rank.at(-1)?.subject.name ?? "Noch offen"}</div><div className="metric-foot">{rank.at(-1)?.average === null || !rank.length ? "Kein Schnitt vorhanden" : `${rank.at(-1)?.average?.toFixed(2).replace(".", ",")} Punkte`}</div></article></section><section className="dashboard-columns grade-dashboard-columns"><article className="panel semester-overview"><div className="panel-heading"><div><h2>Durchschnitt je Halbjahr</h2><p>Erfasste Leistung nach Halbjahr.</p></div><button className="text-button" onClick={onShowCalculation}>Rechenweg</button></div><div className="semester-bars">{termResults.map(({ semester, average: value, subjectCount }) => <div className="semester-bar" key={semester}><div className="semester-bar-top"><span>{semesterLabel(semester)}</span><strong>{value === null ? "–" : value.toFixed(2).replace(".", ",")}</strong></div><div className="semester-track"><span style={{ width: `${value === null ? 0 : value / 15 * 100}%` }} /></div><small>{subjectCount} Fächer</small></div>)}</div></article><article className="panel development-panel"><div className="panel-heading"><div><h2>Leistungsentwicklung</h2><p>Halbjahresschnitt im Verlauf.</p></div></div><div className="development-list">{termResults.map(({ semester, average: value }, index) => { const previous = termResults[index - 1]?.average; const trend = value === null || previous === null || previous === undefined ? "–" : value > previous ? "↗" : value < previous ? "↘" : "→"; return <div className="development-row" key={semester}><span className="development-semester">{semesterLabel(semester)}</span><span className="development-track"><i style={{ width: `${value === null ? 0 : value / 15 * 100}%` }} /></span><strong>{value === null ? "–" : value.toFixed(2).replace(".", ",")}</strong><span className={trend === "↗" ? "trend positive" : trend === "↘" ? "trend negative" : "trend flat"}>{trend}</span></div>; })}</div></article></section><article className="panel dashboard-subject-panel"><div className="panel-heading"><div><h2>Fächerübersicht</h2><p>{current ? `Aktuelles Halbjahr · ${semesterLabel(current.semester)}` : "Fachschnitte über die Halbjahre"}</p></div><button className="text-button" onClick={onOpenSubjects}>Fächer verwalten <ArrowRight size={14} /></button></div><div className="table-scroll"><table className="grades-table"><thead><tr><th>FACH</th><th>KURSART</th><th>H1</th><th>H2</th><th>H3</th><th>H4</th><th>AKTUELL</th></tr></thead><tbody>{subjects.map((subject) => { const rows = SEMESTERS.map((semester) => calculateSubject(subject, performances, semester)); const latestResult = calculateSubject(subject, performances, latest?.semester ?? 1); return <tr key={subject.id}><td><span className={`subject-mark ${subject.color}`}>{subject.code}</span><span className="subject-name">{subject.name}</span></td><td>{subject.courseType}</td>{rows.map((row) => <td key={row.semester}><span className={row.average === null ? "history-empty" : "history-grade"}>{row.average === null ? "–" : row.average.toFixed(1).replace(".", ",")}</span></td>)}<td>{latestResult.average === null ? "–" : <ScorePill value={Math.round(latestResult.average)} compact />}</td></tr>; })}</tbody></table></div><div className="model-caption"><Calculator size={13} /> Individuelle Gewichtungen; keine offizielle Zeugnisnote.</div></article></>;
 }
 
-function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit, onDelete, onGrade, onWeights, onMode, onPerformanceEdit, onPerformanceDelete }: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, written: number, oral: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
+function _DuplicateSubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit, onDelete, onGrade, onWeights, onMode, onPerformanceEdit, onPerformanceDelete }: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, written: number, oral: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const filtered = subjects.filter((item) => `${item.name} ${item.code}`.toLowerCase().includes(query.toLowerCase()));
@@ -1353,11 +1733,11 @@ function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit
   return <><section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> NOTENVERWALTUNG · BADEN-WÜRTTEMBERG</div><h1>Deine <span>Fächer.</span></h1><p>Kurse, Gewichtungen und alle Leistungen an einem Ort.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Fach hinzufügen</button></section><div className="model-notice"><Calculator size={14} /><span><strong>Persönliche Modellrechnung</strong> · ersetzt nicht die offizielle schulische Bewertung.</span></div><section className="subject-summary"><div><span>Fächer</span><strong>{subjects.length}</strong></div><div><span>Leistungen · {semesterLabel(semester)}</span><strong>{gradebook.performances.filter((item) => item.semester === semester).length}</strong></div><div><span>Halbjahresschnitt · {semesterLabel(semester)}</span><strong>{formatPoints(term.average, 2)}<small> Punkte</small></strong></div></section><article className="panel full-subjects subject-manager"><div className="panel-heading manager-heading"><div><h2>Kursübersicht</h2><p>Fach anklicken, um Noten, Gewichtung und Rechenweg zu verwalten.</p></div><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fach suchen" /></label></div><div className="semester-selector">{SEMESTERS.map((value) => <button key={value} className={semester === value ? "selected" : ""} onClick={() => onSemester(value)}>{semesterLabel(value)}</button>)}</div><div className="subject-list">{filtered.map((subject) => { const result = calculateSubject(subject, gradebook.performances, semester); const active = expanded === subject.id; const setting = subject.settings[semester]; return <section className={`managed-subject ${active ? "expanded" : ""}`} key={subject.id}><div className="managed-subject-main"><button className="subject-expand" onClick={() => setExpanded(active ? null : subject.id)} aria-expanded={active}><ChevronRight size={15} className="expand-chevron" /><span className={`subject-mark ${subject.color}`}>{subject.code}</span><span className="managed-subject-name"><strong>{subject.name}</strong><small>{subject.courseType} · Fachgewicht {subject.weight}× · {subject.state}</small></span></button><span className={`mode-badge ${setting.mode}`}>{setting.mode === "manual" ? "Manueller Schnitt" : "Einzelnoten"}</span><span className="managed-average">{formatPoints(result.average, 2)}<small> P</small></span><div className="managed-actions"><button className="icon-button" aria-label={`${subject.name} bearbeiten`} onClick={() => onEdit(subject)}><Pencil size={14} /></button><button className="icon-button danger-hover" aria-label={`${subject.name} löschen`} onClick={() => onDelete(subject)}><Trash2 size={14} /></button></div></div>{active && <div className="subject-details"><div className="entry-mode-row"><span>Eingabemodus · {semesterLabel(semester)}</span><button className={`mode-switch ${setting.mode === "individual" ? "active" : ""}`} onClick={() => setting.mode !== "individual" && onMode(subject.id, semester, "individual")}>Einzelleistungen</button><button className={`mode-switch ${setting.mode === "manual" ? "active" : ""}`} onClick={() => setting.mode !== "manual" && onGrade(subject, true)}>Manueller Schnitt</button></div>{setting.mode === "manual" ? <div className="manual-average-panel"><div><span>Manuell eingetragener Schnitt</span><strong>{setting.manualAverage === null ? "Noch nicht gesetzt" : `${formatPoints(setting.manualAverage, 2)} Punkte`}</strong><small>Einzelnoten werden in diesem Modus nicht angerechnet.</small></div><button className="button button-quiet small-button" onClick={() => onGrade(subject, true)}><Pencil size={13} /> Bearbeiten</button></div> : <><div className="area-weight-grid"><AreaSummary title="Schriftlich" result={result.written} weight={setting.writtenWeight} onWeight={(value) => onWeights(subject.id, semester, value, setting.oralWeight)} /><AreaSummary title="Mündlich" result={result.oral} weight={setting.oralWeight} onWeight={(value) => onWeights(subject.id, semester, setting.writtenWeight, value)} /></div><div className="detail-actions"><button className="button button-primary small-button" onClick={() => onGrade(subject)}><Plus size={14} /> Leistung eintragen</button><button className="button button-quiet small-button" onClick={() => onGrade(subject, true)}>Bekannten Schnitt eintragen</button><span>Faktor 0 schließt die Note aus.</span></div>{result.performances.length ? <div className="performance-table-wrap"><table className="performance-table"><thead><tr><th>LEISTUNG</th><th>BEREICH</th><th>DATUM</th><th>PUNKTE</th><th>FAKTOR</th><th></th></tr></thead><tbody>{result.performances.map((item) => <tr key={item.id}><td><strong>{item.title}</strong><small>{item.kind}</small></td><td>{item.area === "written" ? "Schriftlich" : "Mündlich"}</td><td>{item.date ? new Date(`${item.date}T12:00:00`).toLocaleDateString("de-DE") : "–"}</td><td><ScorePill value={item.points} compact /></td><td>{item.weight}×</td><td><button className="text-button" onClick={() => onPerformanceEdit(item)}>Bearbeiten</button><button className="text-button remove-performance" aria-label={`${item.title} löschen`} onClick={() => onPerformanceDelete(item.id)}><Trash2 size={13} /></button></td></tr>)}</tbody></table></div> : <p className="empty-performances">Noch keine Einzelleistungen in {semesterLabel(semester)}.</p>}</>}<details className="calculation-details"><summary>Rechenweg ansehen</summary><div className="calculation-copy">{setting.mode === "manual" ? <p>Manueller Durchschnitt: <strong>{formatPoints(setting.manualAverage, 2)} P</strong>; Einzelnoten ausgeschlossen.</p> : <><p>Schriftlich: {result.written.count ? `(${result.performances.filter((item) => item.area === "written").map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(result.written.denominator, 2)} = ${formatPoints(result.written.average, 2)}` : "keine gewichteten Leistungen"}.</p><p>Mündlich: {result.oral.count ? `(${result.performances.filter((item) => item.area === "oral").map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(result.oral.denominator, 2)} = ${formatPoints(result.oral.average, 2)}` : "keine gewichteten Leistungen"}.</p><p>Bereichsgewicht Schriftlich {setting.writtenWeight}× · Mündlich {setting.oralWeight}×. Fachgewicht {subject.weight}× zählt im Gesamtschnitt.</p></>}<p>Persönliche Modellrechnung, keine offizielle schulische Bewertung.</p></div></details></div>}</section>; })}{filtered.length === 0 && <p className="empty-search">Keine Fächer gefunden.</p>}</div></article></>;
 }
 
-function AreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
+function _DuplicateAreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
   return <div className="area-summary"><div className="area-summary-heading"><div><span>{title}</span><strong>{formatPoints(result.average, 2)}<small> P</small></strong></div><span className="course-tag">{result.count} Leistungen</span></div><label>Bereichsgewicht <input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => onWeight(Math.max(0, Number(event.target.value)))} />×</label><small>Rechenfaktor {result.denominator.toFixed(2).replace(".", ",")}</small></div>;
 }
 
-function SubjectModal({ subject, onClose, onSave }: { subject?: SchoolSubject; onClose: () => void; onSave: (subject: SchoolSubject) => void }) {
+function _DuplicateSubjectModal({ subject, onClose, onSave }: { subject?: SchoolSubject; onClose: () => void; onSave: (subject: SchoolSubject) => void }) {
   const [name, setName] = useState(subject?.name ?? "");
   const [code, setCode] = useState(subject?.code ?? "");
   const [state, setState] = useState(subject?.state ?? "Baden-Württemberg");
@@ -1365,10 +1745,10 @@ function SubjectModal({ subject, onClose, onSave }: { subject?: SchoolSubject; o
   const [weight, setWeight] = useState(subject?.weight ?? 1);
   const [written, setWritten] = useState(subject?.settings[1].writtenWeight ?? 1);
   const [oral, setOral] = useState(subject?.settings[1].oralWeight ?? 1);
-  return <ModalFrame onClose={onClose} labelledBy="subject-modal-title"><form className="add-modal extended-modal" onSubmit={(event) => { event.preventDefault(); if (!name.trim() || !code.trim()) return; const settings = subject ? { ...subject.settings } : EMPTY_SEMESTER_SETTINGS(); SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: written, oralWeight: oral }; }); onSave({ id: subject?.id ?? newId(), name: name.trim(), code: code.trim().toUpperCase(), state, courseType, weight: Math.max(0.1, weight), settings, color: subject?.color ?? COLORS[0] }); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">FÄCHERVERWALTUNG</span><h2 id="subject-modal-title">{subject ? "Fach bearbeiten" : "Fach hinzufügen"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><div className="form-grid"><label className="form-label">Fachname<input value={name} onChange={(event) => setName(event.target.value)} maxLength={} required /></label><label className="form-label">Kürzel<input value={code} onChange={(event) => setCode(event.target.value)} maxLength={5} required /></label><label className="form-label">Bundesland<select value={state} onChange={(event) => setState(event.target.value)}><option>Baden-Württemberg</option></select></label><label className="form-label">Kursart<select value={courseType} onChange={(event) => setCourseType(event.target.value as SchoolSubject["courseType"])}><option>Basisfach</option><option>Leistungsfach</option></select></label><label className="form-label">Fachgewicht<input type="number" min="0.1" max="10" step="0.1" value={weight} onChange={(event) => setWeight(Number(event.target.value))} required /></label><label className="form-label">Schriftliches Gewicht<input type="number" min="0" max="20" step="0.25" value={written} onChange={(event) => setWritten(Number(event.target.value))} required /></label><label className="form-label">Mündliches Gewicht<input type="number" min="0" max="20" step="0.25" value={oral} onChange={(event) => setOral(Number(event.target.value))} required /></label></div><p className="grade-scale">Gewichtungsverhältnis schriftlich : mündlich = {written} : {oral}; pro Halbjahr anpassbar.</p><div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary" disabled={!name.trim() || !code.trim()}><Check size={15} /> Speichern</button></div></form></ModalFrame>;
+  return <ModalFrame onClose={onClose} labelledBy="subject-modal-title"><form className="add-modal extended-modal" onSubmit={(event) => { event.preventDefault(); if (!name.trim() || !code.trim()) return; const settings = subject ? { ...subject.settings } : EMPTY_SEMESTER_SETTINGS(); SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: written, oralWeight: oral }; }); onSave({ id: subject?.id ?? newId(), name: name.trim(), code: code.trim().toUpperCase(), state, courseType, weight: Math.max(0.1, weight), settings, color: subject?.color ?? COLORS[0] }); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">FÄCHERVERWALTUNG</span><h2 id="subject-modal-title">{subject ? "Fach bearbeiten" : "Fach hinzufügen"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><div className="form-grid"><label className="form-label">Fachname<input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} required /></label><label className="form-label">Kürzel<input value={code} onChange={(event) => setCode(event.target.value)} maxLength={5} required /></label><label className="form-label">Bundesland<select value={state} onChange={(event) => setState(event.target.value)}><option>Baden-Württemberg</option></select></label><label className="form-label">Kursart<select value={courseType} onChange={(event) => setCourseType(event.target.value as SchoolSubject["courseType"])}><option>Basisfach</option><option>Leistungsfach</option></select></label><label className="form-label">Fachgewicht<input type="number" min="0.1" max="10" step="0.1" value={weight} onChange={(event) => setWeight(Number(event.target.value))} required /></label><label className="form-label">Schriftliches Gewicht<input type="number" min="0" max="20" step="0.25" value={written} onChange={(event) => setWritten(Number(event.target.value))} required /></label><label className="form-label">Mündliches Gewicht<input type="number" min="0" max="20" step="0.25" value={oral} onChange={(event) => setOral(Number(event.target.value))} required /></label></div><p className="grade-scale">Gewichtungsverhältnis schriftlich : mündlich = {written} : {oral}; pro Halbjahr anpassbar.</p><div className="modal-actions"><button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary" disabled={!name.trim() || !code.trim()}><Check size={15} /> Speichern</button></div></form></ModalFrame>;
 }
 
-function PerformanceModal({ subjects, initial, initialSubjectId, initialSemester, manual, onClose, onSave, onSaveManual, onDelete }: { subjects: SchoolSubject[]; initial?: Performance; initialSubjectId?: string; initialSemester?: Semester; manual?: boolean; onClose: () => void; onSave: (performance: Performance) => void; onSaveManual: (subjectId: string, semester: Semester, points: number) => void; onDelete: (id: string) => void }) {
+function _DuplicatePerformanceModal({ subjects, initial, initialSubjectId, initialSemester, manual, onClose, onSave, onSaveManual, onDelete }: { subjects: SchoolSubject[]; initial?: Performance; initialSubjectId?: string; initialSemester?: Semester; manual?: boolean; onClose: () => void; onSave: (performance: Performance) => void; onSaveManual: (subjectId: string, semester: Semester, points: number) => void; onDelete: (id: string) => void }) {
   const [subjectId, setSubjectId] = useState(initial?.subjectId ?? initialSubjectId ?? subjects[0]?.id ?? "");
   const [semester, setSemester] = useState<Semester>(initial?.semester ?? initialSemester ?? 1);
   const [points, setPoints] = useState(String(initial?.points ?? ""));
@@ -1382,21 +1762,140 @@ function PerformanceModal({ subjects, initial, initialSubjectId, initialSemester
   return <ModalFrame onClose={onClose} labelledBy="performance-modal-title"><form className="add-modal extended-modal" onSubmit={(event) => { event.preventDefault(); if (!selected || points === "") return; const value = Math.max(0, Math.min(15, Number(points))); if (mode === "manual") { onSaveManual(subjectId, semester, value); return; } onSave({ id: initial?.id ?? newId(), subjectId, semester, points: value, kind, area: kind === "GFS" ? area : kind === "Klausur" || kind === "Test / Klassenarbeit" ? "written" : "oral", date, title: title.trim() || kind, weight: Math.max(0, weight) }); }}><div className="modal-heading"><div><span className="eyebrow small-eyebrow">{mode === "manual" ? "MANUELLER MODUS · EINZELNOTEN AUS" : "LEISTUNG · INDIVIDUELL GEWICHTET"}</span><h2 id="performance-modal-title">{mode === "manual" ? "Fachschnitt eintragen" : initial ? "Leistung bearbeiten" : "Neue Leistung"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><div className="form-grid"><label className="form-label">Fach<select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label><label className="form-label">Halbjahr<select value={semester} onChange={(event) => setSemester(Number(event.target.value) as Semester)}>{SEMESTERS.map((item) => <option key={item} value={item}>{semesterLabel(item)}</option>)}</select></label><label className="form-label full-field">Eingabemodus<select value={mode} onChange={(event) => setMode(event.target.value as "individual" | "manual")}><option value="individual">Einzelleistungen</option><option value="manual">Bekannten Fachschnitt eintragen (ersetzt Einzelnoten)</option></select></label>{mode === "manual" ? <><label className="form-label full-field">Durchschnitt · 0–15 Punkte<input type="number" min="0" max="15" step="0.01" value={points} onChange={(event) => setPoints(event.target.value)} required /></label><p className="manual-warning full-field">Der bekannte Durchschnitt ersetzt alle Einzelnoten für dieses Fach/Halbjahr.</p></> : <><label className="form-label">Punkte · 0 bis 15<input type="number" min="0" max="15" step="1" value={points} onChange={(event) => setPoints(event.target.value)} required /></label><label className="form-label">Leistungsart<select value={kind} onChange={(event) => setKind(event.target.value as GradeKind)}>{GRADE_KINDS.map((item) => <option key={item}>{item}</option>)}</select></label>{kind === "GFS" && <label className="form-label full-field">GFS-Leistungsbereich<select value={area} onChange={(event) => setArea(event.target.value as GradeArea)}><option value="written">Schriftlicher Bereich</option><option value="oral">Mündlicher Bereich</option></select></label>}<label className="form-label">Datum<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label className="form-label">Gewichtungsfaktor<input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => setWeight(Number(event.target.value))} /></label><label className="form-label full-field">Bezeichnung oder Thema<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} placeholder="z. B. Analysis · Integralrechnung" /></label></>}</div><div className="modal-actions">{initial && <button type="button" className="button delete-button" onClick={() => onDelete(initial.id)}><Trash2 size={14} /> Löschen</button>}<button type="button" className="button button-quiet" onClick={onClose}>Abbrechen</button><button className="button button-primary" disabled={!selected || points === ""}><Check size={15} /> Speichern</button></div></form></ModalFrame>;
 }
 
-function ModalFrame({ children, onClose, labelledBy }: { children: React.ReactNode; onClose: () => void; labelledBy: string }) {
+function _DuplicateModalFrame({ children, onClose, labelledBy }: { children: React.ReactNode; onClose: () => void; labelledBy: string }) {
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby={labelledBy}>{children}</div></div>;
 }
-function ConfirmDelete({ subject, onCancel, onConfirm }: { subject: SchoolSubject; onCancel: () => void; onConfirm: () => void }) {
-  return <ModalFrame onClose={onCancel} labelledBy="delete-subject-title"><div className="add-modal confirm-modal"><span className="eyebrow small-eyebrow">FACH UND LEISTUNGEN ENTFERNEN</span><h2 id="delete-subject-title">{subject.name} löschen?</h2><p>Das Fach und sämtliche zugehörigen Einzelnoten werden aus diesem Browser gelöscht.</p><div className="modal-actions"><button className="button button-quiet" onClick={onCancel}>Abbrechen</button><button className="button delete-button" onClick={onConfirm}><Trash2 size={14} /> Fach und Noten löschen</button></div></div></ModalFrame>;
+function _DuplicateConfirmDelete({ subject, onCancel, onConfirm }: { subject: SchoolSubject; onCancel: () => void; onConfirm: () => void }) {
+  return <ModalFrame onClose={onCancel} labelledBy="delete-subject-title"><div className="add-modal confirm-modal"><span className="eyebrow small-eyebrow">FACH UND LEISTUNGEN ENTFERNEN</span><h2 id="delete-subject-title">{subject.name} löschen?</h2><p>Das Fach und sämtliche zugehörigen Einzelnoten werden aus deinem Notenbuch gelöscht.</p><div className="modal-actions"><button className="button button-quiet" onClick={onCancel}>Abbrechen</button><button className="button delete-button" onClick={onConfirm}><Trash2 size={14} /> Fach und Noten löschen</button></div></div></ModalFrame>;
 }
-function CalculationModal({ result, semester, onClose }: { result: ReturnType<typeof calculateSemester>; semester: Semester; onClose: () => void }) {
+function _DuplicateCalculationModal({ result, semester, onClose }: { result: ReturnType<typeof calculateSemester>; semester: Semester; onClose: () => void }) {
   return <ModalFrame onClose={onClose} labelledBy="calculation-title"><div className="add-modal calculation-modal"><div className="modal-heading"><div><span className="eyebrow small-eyebrow">PERSÖNLICHE MODELLRECHNUNG</span><h2 id="calculation-title">Rechenweg · {semesterLabel(semester)}</h2></div><button className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div><p className="calculation-lead">Halbjahresschnitt: <strong>{formatPoints(result.average, 2)} Punkte</strong></p><div className="calc-steps">{result.results.map((item) => <div className="calc-step" key={item.subject.id}><strong>{item.subject.name}</strong><span>{item.mode === "manual" ? `Manueller Fachschnitt ${formatPoints(item.average, 2)} P; Einzelnoten ausgeschlossen.` : `Schriftlich ${formatPoints(item.written.average, 2)} P × ${item.subject.settings[semester].writtenWeight}; mündlich ${formatPoints(item.oral.average, 2)} P × ${item.subject.settings[semester].oralWeight}; Fachgewicht ${item.subject.weight}×.`}</span></div>)}</div><p className="manual-warning">Unverbindlich; die offizielle schulische Bewertung kann abweichen.</p><div className="modal-actions"><button className="button button-primary" onClick={onClose}>Schließen</button></div></div></ModalFrame>;
 }
 
 
-function SettingsPage({ theme, onTheme, preferences, onPreferences, onExport, onImport, onReset, saveWarning }: { theme: Theme; onTheme: (theme: Theme) => void; preferences: AppPreferences; onPreferences: (preferences: AppPreferences) => void; onExport: () => void; onImport: () => void; onReset: () => void; saveWarning: boolean }) {
- const update = (patch: Partial<AppPreferences>) => onPreferences({ ...preferences, ...patch });
- const themes: { id: Theme; label: string; description: string; icon: typeof Sun }[] = [{ id: "light", label: "Hell", description: "Klar und konzentriert", icon: Sun }, { id: "dark", label: "Dunkel", description: "Angenehm bei wenig Licht", icon: Moon }, { id: "sepia", label: "Sepia", description: "Warm und augenschonend", icon: Coffee }];
- return <><section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> DEIN BEREICH</div><h1>Deine <span>Einstellungen.</span></h1><p>Schuljahr, Theme und lokale Datensicherung.</p></div></section><section className="settings-layout"><article className="panel settings-panel"><div className="settings-section-title"><div><h2>Darstellung</h2><p>Wähle dein Erscheinungsbild.</p></div></div><div className="theme-options">{themes.map(({ id, label, description, icon: Icon }) => <button key={id} className={`theme-option ${theme === id ? "selected" : ""}`} onClick={() => onTheme(id)}><span className={`theme-preview preview-${id}`}><Icon size={17} /></span><span className="theme-label"><strong>{label}</strong><small>{description}</small></span>{theme === id && <span className="theme-check"><Check size={13} /></span>}</button>)}</div><div className="settings-divider"/><div className="settings-section-title"><div><h2>Schulprofil</h2><p>Diese Einstellungen steuern die Halbjahresübersicht.</p></div></div><label className="setting-control">Bundesland<select value={preferences.state} onChange={(event) => update({ state: event.target.value })}><option>Baden-Württemberg</option></select><small>Weitere Bundesländer werden hinzugefügt, sobald ihre Regeln geprüft sind.</small></label><label className="setting-control">Schulart<select value={preferences.schoolType} onChange={(event) => update({ schoolType: event.target.value })}><option>Allgemeinbildendes Gymnasium</option></select></label><div className="form-grid settings-prefs-grid"><label className="setting-control">Schuljahr<input value={preferences.schoolYear} onChange={(event) => update({ schoolYear: event.target.value })} placeholder="2025/26" /></label><label className="setting-control">Aktuelles Halbjahr<select value={preferences.currentSemester} onChange={(event) => update({ currentSemester: Number(event.target.value) as Semester })}>{SEMESTERS.map((item) => <option key={item} value={item}>{semesterLabel(item)}</option>)}</select></label></div></article><aside className="panel data-panel"><div className="data-icon">{saveWarning ? <CircleHelp size={17}/> : <Check size={17}/>}</div><h2>Lokale Datensicherung</h2><p>Keine Anmeldung, kein Backend und kein Upload persönlicher Noten. Deine Daten bleiben in diesem Browser, bis du sie exportierst oder zurücksetzt.</p><div className="storage-status"><span className={`status-dot ${saveWarning ? "warning-dot" : ""}`}/>{saveWarning ? "Speicherung prüfen" : "Lokal gespeichert"}</div><div className="backup-actions"><button className="button button-primary" onClick={onExport}><ArrowDownRight size={14}/> JSON exportieren</button><button className="button button-quiet" onClick={onImport}>JSON importieren</button></div><button className="reset-button destructive-reset" onClick={onReset}>Alle Daten zurücksetzen…</button></aside></section><div className="settings-footnote"><Command size={14}/> JSON-Dateien werden vor dem Import vollständig validiert. Ein vorhandener Datenstand wird erst nach deiner Bestätigung ersetzt.</div></>;
+function SettingsPage({
+  theme,
+  onTheme,
+  preferences,
+  onPreferences,
+  onExport,
+  onImport,
+  onReset,
+  saveWarning,
+  accountProps,
+}: {
+  theme: Theme;
+  onTheme: (theme: Theme) => void;
+  preferences: AppPreferences;
+  onPreferences: (preferences: AppPreferences) => void;
+  onExport: () => void;
+  onImport: () => void;
+  onReset: () => void;
+  saveWarning: boolean;
+  accountProps: Parameters<typeof FirebaseAccountPanel>[0];
+}) {
+  const update = (patch: Partial<AppPreferences>) =>
+    onPreferences({ ...preferences, ...patch });
+  const themes: {
+    id: Theme;
+    label: string;
+    description: string;
+    icon: typeof Sun;
+  }[] = [
+    { id: "light", label: "Hell", description: "Klar und konzentriert", icon: Sun },
+    { id: "dark", label: "Dunkel", description: "Angenehm bei wenig Licht", icon: Moon },
+    { id: "sepia", label: "Sepia", description: "Warm und augenschonend", icon: Coffee },
+  ];
+
+  return (
+    <>
+      <section className="page-heading">
+        <div>
+          <div className="eyebrow"><span className="status-dot" /> DEIN BEREICH</div>
+          <h1>Deine <span>Einstellungen.</span></h1>
+          <p>Schuljahr, Theme, Konto und Datensicherung.</p>
+        </div>
+      </section>
+      <section className="settings-layout">
+        <article className="panel settings-panel">
+          <div className="settings-section-title">
+            <div><h2>Darstellung</h2><p>Wähle dein Erscheinungsbild.</p></div>
+          </div>
+          <div className="theme-options">
+            {themes.map(({ id, label, description, icon: Icon }) => (
+              <button
+                key={id}
+                className={`theme-option ${theme === id ? "selected" : ""}`}
+                onClick={() => onTheme(id)}
+              >
+                <span className={`theme-preview preview-${id}`}><Icon size={17} /></span>
+                <span className="theme-label"><strong>{label}</strong><small>{description}</small></span>
+                {theme === id && <span className="theme-check"><Check size={13} /></span>}
+              </button>
+            ))}
+          </div>
+          <div className="settings-divider" />
+          <div className="settings-section-title">
+            <div><h2>Schulprofil</h2><p>Diese Einstellungen steuern die Halbjahresübersicht.</p></div>
+          </div>
+          <label className="setting-control">
+            Bundesland
+            <select value={preferences.state} onChange={(event) => update({ state: event.target.value })}>
+              <option>Baden-Württemberg</option>
+            </select>
+            <small>Weitere Bundesländer werden hinzugefügt, sobald ihre Regeln geprüft sind.</small>
+          </label>
+          <label className="setting-control">
+            Schulart
+            <select value={preferences.schoolType} onChange={(event) => update({ schoolType: event.target.value })}>
+              <option>Allgemeinbildendes Gymnasium</option>
+            </select>
+          </label>
+          <div className="form-grid settings-prefs-grid">
+            <label className="setting-control">
+              Schuljahr
+              <input value={preferences.schoolYear} onChange={(event) => update({ schoolYear: event.target.value })} placeholder="2025/26" />
+            </label>
+            <label className="setting-control">
+              Aktuelles Halbjahr
+              <select value={preferences.currentSemester} onChange={(event) => update({ currentSemester: Number(event.target.value) as Semester })}>
+                {SEMESTERS.map((item) => <option key={item} value={item}>{semesterLabel(item)}</option>)}
+              </select>
+            </label>
+          </div>
+        </article>
+        <div className="settings-cloud-column">
+          <FirebaseAccountPanel {...accountProps} />
+          <aside className="panel data-panel">
+            <div className="data-icon">{saveWarning ? <CircleHelp size={17} /> : <Check size={17} />}</div>
+            <h2>Datensicherung</h2>
+            <p>
+              Im Gastmodus bleiben Daten auf diesem Gerät. Bei Anmeldung
+              synchronisiert 15Punkte über Firebase; deine Noten sind nur mit
+              deinem Konto abrufbar. Exportiere regelmäßig eine JSON-Sicherung.
+            </p>
+            <div className="storage-status">
+              <span className={`status-dot ${saveWarning ? "warning-dot" : ""}`} />
+              {saveWarning ? "Lokale Speicherung prüfen" : "JSON-Export und -Import verfügbar"}
+            </div>
+            <div className="backup-actions">
+              <button className="button button-primary" onClick={onExport}>
+                <ArrowDownRight size={14} /> JSON exportieren
+              </button>
+              <button className="button button-quiet" onClick={onImport}>JSON importieren</button>
+            </div>
+            <button className="reset-button destructive-reset" onClick={onReset}>
+              Alle Daten zurücksetzen …
+            </button>
+          </aside>
+        </div>
+      </section>
+      <div className="settings-footnote">
+        <Command size={14} /> JSON-Dateien werden vor dem Import vollständig
+        validiert. Ein vorhandener Datenstand wird erst nach deiner Bestätigung ersetzt.
+      </div>
+    </>
+  );
 }
 
 function ConfirmAction({ title, message, confirmLabel, onCancel, onConfirm }: { title: string; message: string; confirmLabel: string; onCancel: () => void; onConfirm: () => void }) {

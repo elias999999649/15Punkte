@@ -7,20 +7,24 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-15punkte \"node --test tests/firestore.rules.test.mjs\""
   },
   "dependencies": {
     "@astrojs/react": "^4.2.0",
     "@tailwindcss/vite": "^4.0.0",
     "astro": "^5.5.0",
+    "firebase": "^13.4.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "firebase-tools": "^15.37.0",
     "typescript": "^5.7.0"
   }
 }
