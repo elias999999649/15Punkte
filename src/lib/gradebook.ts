@@ -2,7 +2,7 @@ export const SEMESTERS = [1, 2, 3, 4] as const;
 export type Semester = (typeof SEMESTERS)[number];
 export type CourseType = "Leistungsfach" | "Basisfach";
 export type GradeKind = string;
-export type GradeArea = "written" | "oral";
+export type GradeArea = "written" | "oral" | "practical";
 export type EntryMode = "individual" | "manual";
 
 export type SemesterSettings = {
@@ -10,6 +10,7 @@ export type SemesterSettings = {
   manualAverage: number | null;
   writtenWeight: number;
   oralWeight: number;
+  practicalWeight?: number;
 };
 
 export type SchoolSubject = {
@@ -54,6 +55,7 @@ export type SubjectResult = {
   average: number | null;
   written: AreaResult;
   oral: AreaResult;
+  practical: AreaResult;
   performances: Performance[];
 };
 
@@ -82,24 +84,28 @@ export const EMPTY_SEMESTER_SETTINGS = (): Record<
     manualAverage: null,
     writtenWeight: 1,
     oralWeight: 1,
+    practicalWeight: 1,
   },
   2: {
     mode: "individual",
     manualAverage: null,
     writtenWeight: 1,
     oralWeight: 1,
+    practicalWeight: 1,
   },
   3: {
     mode: "individual",
     manualAverage: null,
     writtenWeight: 1,
     oralWeight: 1,
+    practicalWeight: 1,
   },
   4: {
     mode: "individual",
     manualAverage: null,
     writtenWeight: 1,
     oralWeight: 1,
+    practicalWeight: 1,
   },
 });
 export const emptyGradebook = (): GradebookData => ({
@@ -114,6 +120,14 @@ export const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+export function areaWeight(settings: SemesterSettings, area: GradeArea) {
+  return area === "written" ? settings.writtenWeight : area === "oral" ? settings.oralWeight : settings.practicalWeight ?? 1;
+}
+
+export function courseWeight(subject: SchoolSubject) {
+  return subject.courseType === "Leistungsfach" ? 2 : subject.weight;
+}
 
 function areaForKind(kind: GradeKind): GradeArea {
   return kind === "Klausur" || kind === "Test / Klassenarbeit"
@@ -148,6 +162,7 @@ export function calculateSubject(
   );
   const written = areaResult(items, "written");
   const oral = areaResult(items, "oral");
+  const practical = areaResult(items, "practical");
   if (settings.mode === "manual") {
     return {
       subject,
@@ -156,21 +171,21 @@ export function calculateSubject(
       average: settings.manualAverage,
       written,
       oral,
+      practical,
       performances: items,
     };
   }
-  const activeAreas = [
-    ...(written.average === null
-      ? []
-      : [{ average: written.average, weight: settings.writtenWeight }]),
-    ...(oral.average === null
-      ? []
-      : [{ average: oral.average, weight: settings.oralWeight }]),
-  ].filter((area) => area.weight > 0);
+  const activeAreas = ([
+    [written, "written"],
+    [oral, "oral"],
+    [practical, "practical"],
+  ] as const)
+    .filter(([result]) => result.average !== null)
+    .map(([result, area]) => ({ average: result.average!, weight: areaWeight(settings, area) }))
+    .filter((area) => area.weight > 0);
   const divisor = activeAreas.reduce((sum, area) => sum + area.weight, 0);
   const average = divisor
-    ? activeAreas.reduce((sum, area) => sum + area.average * area.weight, 0) /
-      divisor
+    ? activeAreas.reduce((sum, area) => sum + area.average * area.weight, 0) / divisor
     : null;
   return {
     subject,
@@ -179,6 +194,7 @@ export function calculateSubject(
     average,
     written,
     oral,
+    practical,
     performances: items,
   };
 }
@@ -188,12 +204,12 @@ export function calculateSemester(data: GradebookData, semester: Semester) {
     .map((subject) => calculateSubject(subject, data.performances, semester))
     .filter((result) => result.average !== null);
   const denominator = results.reduce(
-    (sum, result) => sum + result.subject.weight,
+    (sum, result) => sum + courseWeight(result.subject),
     0,
   );
   const average = denominator
     ? results.reduce(
-        (sum, result) => sum + result.average! * result.subject.weight,
+        (sum, result) => sum + result.average! * courseWeight(result.subject),
         0,
       ) / denominator
     : null;
@@ -246,7 +262,7 @@ export function validateGradebookDocument(value: unknown): { ok: true; document:
   }
   const performanceIds = new Set<string>();
   for (const item of document.data.performances) {
-    if (!item || typeof item.id !== "string" || !item.id || performanceIds.has(item.id) || !subjectIds.has(item.subjectId) || ![1, 2, 3, 4].includes(item.semester) || !Number.isFinite(item.points) || item.points < 0 || item.points > 15 || !(GRADE_KINDS.includes(item.kind) || customGradeKinds.includes(item.kind)) || !["written", "oral"].includes(item.area) || !Number.isFinite(item.weight) || item.weight < 0 || typeof item.title !== "string" || typeof item.date !== "string") return { ok: false, error: "Mindestens eine Leistung enthält ungültige Angaben (Fach, Halbjahr, Punkte oder Gewichtung)." };
+    if (!item || typeof item.id !== "string" || !item.id || performanceIds.has(item.id) || !subjectIds.has(item.subjectId) || ![1, 2, 3, 4].includes(item.semester) || !Number.isFinite(item.points) || item.points < 0 || item.points > 15 || !(GRADE_KINDS.includes(item.kind) || customGradeKinds.includes(item.kind)) || !["written", "oral", "practical"].includes(item.area) || !Number.isFinite(item.weight) || item.weight < 0 || typeof item.title !== "string" || typeof item.date !== "string") return { ok: false, error: "Mindestens eine Leistung enthält ungültige Angaben (Fach, Halbjahr, Punkte oder Gewichtung)." };
     if (document.data.subjects.find((subject) => subject.id === item.subjectId)!.settings[item.semester].mode === "manual") return { ok: false, error: "Die Datei enthält zugleich einen manuellen Schnitt und Einzelnoten für dasselbe Fach/Halbjahr." };
     performanceIds.add(item.id);
   }
@@ -322,34 +338,34 @@ export function loadGradebook(): GradebookData {
 export function simulatePerformance(subject: SchoolSubject, performances: Performance[], semester: Semester, area: GradeArea, points: number, weight: number) {
   const current = calculateSubject(subject, performances, semester);
   const settings = subject.settings[semester];
-  const added = area === "written" ? { ...current.written, numerator: current.written.numerator + points * weight, denominator: current.written.denominator + weight } : { ...current.oral, numerator: current.oral.numerator + points * weight, denominator: current.oral.denominator + weight };
-  const writtenAverage = area === "written" ? (added.denominator ? added.numerator / added.denominator : null) : current.written.average;
-  const oralAverage = area === "oral" ? (added.denominator ? added.numerator / added.denominator : null) : current.oral.average;
-  const inputs = [
-    ...(writtenAverage === null || settings.writtenWeight <= 0 ? [] : [{ average: writtenAverage, weight: settings.writtenWeight }]),
-    ...(oralAverage === null || settings.oralWeight <= 0 ? [] : [{ average: oralAverage, weight: settings.oralWeight }]),
-  ];
-  const divisor = inputs.reduce((sum, item) => sum + item.weight, 0);
-  const average = divisor ? inputs.reduce((sum, item) => sum + item.average * item.weight, 0) / divisor : null;
-  return { currentAverage: current.average, projectedAverage: average, delta: current.average === null || average === null ? null : average - current.average };
+  const areas: Record<GradeArea, AreaResult> = { written: current.written, oral: current.oral, practical: current.practical };
+  const existing = areas[area];
+  areas[area] = { ...existing, numerator: existing.numerator + points * weight, denominator: existing.denominator + weight };
+  const averages = (Object.keys(areas) as GradeArea[]).map((key) => {
+    const result = areas[key];
+    return { average: result.denominator ? result.numerator / result.denominator : null, weight: areaWeight(settings, key) };
+  }).filter((item): item is { average: number; weight: number } => item.average !== null && item.weight > 0);
+  const divisor = averages.reduce((sum, item) => sum + item.weight, 0);
+  const projectedAverage = divisor ? averages.reduce((sum, item) => sum + item.average * item.weight, 0) / divisor : null;
+  return { currentAverage: current.average, projectedAverage, delta: current.average === null || projectedAverage === null ? null : projectedAverage - current.average };
 }
 
 export function requiredPointsForAverage(subject: SchoolSubject, performances: Performance[], semester: Semester, area: GradeArea, targetAverage: number, weight: number): number | null {
   if (weight <= 0 || targetAverage < 0 || targetAverage > 15) return null;
   const current = calculateSubject(subject, performances, semester);
   const settings = subject.settings[semester];
-  const areaWeight = area === "written" ? settings.writtenWeight : settings.oralWeight;
-  if (areaWeight <= 0) return null;
-  const other = area === "written" ? current.oral.average : current.written.average;
-  const otherWeight = area === "written" ? settings.oralWeight : settings.writtenWeight;
-  const otherContribution = other === null || otherWeight <= 0 ? 0 : other * otherWeight;
-  const denominator = other === null || otherWeight <= 0 ? areaWeight : areaWeight + otherWeight;
-  const targetAreaAverage = (targetAverage * denominator - otherContribution) / areaWeight;
-  const existing = area === "written" ? current.written : current.oral;
+  const areaWeightValue = areaWeight(settings, area);
+  if (areaWeightValue <= 0) return null;
+  const results: Record<GradeArea, AreaResult> = { written: current.written, oral: current.oral, practical: current.practical };
+  const otherAreas = (Object.keys(results) as GradeArea[]).filter((key) => key !== area && results[key].average !== null && areaWeight(settings, key) > 0);
+  const otherContribution = otherAreas.reduce((sum, key) => sum + results[key].average! * areaWeight(settings, key), 0);
+  const otherWeight = otherAreas.reduce((sum, key) => sum + areaWeight(settings, key), 0);
+  const denominator = areaWeightValue + otherWeight;
+  const targetAreaAverage = (targetAverage * denominator - otherContribution) / areaWeightValue;
+  const existing = results[area];
   const needed = (targetAreaAverage * (existing.denominator + weight) - existing.numerator) / weight;
   return Number.isFinite(needed) ? needed : null;
 }
-
 
 export function assertGradebookInvariant(data: GradebookData): { ok: boolean; errors: string[] } {
   const errors: string[] = [];

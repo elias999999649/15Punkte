@@ -32,6 +32,7 @@ import {
   calculateOverall,
   calculateSemester,
   calculateSubject,
+  courseWeight,
   defaultPreferences,
   emptyGoals,
   createDocument,
@@ -636,12 +637,13 @@ export default function App() {
     setDeleteTarget(null);
     notify(`${subject.name} und zugehörige Leistungen wurden gelöscht.`);
   };
-  const saveWeights = (subjectId: string, semester: Semester, writtenWeight: number, oralWeight: number) => {
+  const saveWeights = (subjectId: string, semester: Semester, area: import("../lib/gradebook").GradeArea, weight: number) => {
+    const settingKey = area === "written" ? "writtenWeight" : area === "oral" ? "oralWeight" : "practicalWeight";
     setGradebook((current) => ({ ...current, subjects: current.subjects.map((subject) => {
       if (subject.id !== subjectId) return subject;
       const nextSettings: SchoolSubject["settings"] = {
         ...subject.settings,
-        [semester]: { ...subject.settings[semester], writtenWeight, oralWeight },
+        [semester]: { ...subject.settings[semester], [settingKey]: weight },
       };
       return { ...subject, settings: nextSettings };
     }) }));
@@ -771,12 +773,6 @@ export default function App() {
           {section === "Regeln" && <RulesPage />}
           {section === "Rechner" && <OfficialCalculatorPage data={gradebook} onAddCourse={() => setShowSubject(true)} onAddGrade={() => setGradeTarget({})} />}
           {section === "Einstellungen" && <SettingsPage theme={theme} onTheme={setTheme} preferences={preferences} onPreferences={(next) => { setPreferences(next); setSelectedSemester(next.currentSemester); setTheme(next.theme); }} onExport={downloadBackup} onImport={() => fileInput.current?.click()} onReset={() => setPendingReset(true)} saveWarning={hasUnsavedWarning} accountProps={{ user: authUser, authReady, busy: accountBusy, status: cloudStatus, error: accountError, migrationAvailable: localMigrationAvailable, cloudDataExists, onSignIn: () => void handleGoogleSignIn(), onSignOut: () => void handleGoogleSignOut(), onDeleteAccount: () => setPendingAccountDelete(true), onImportLocal: () => setPendingCloudImport(true), onKeepCurrent: keepCurrentCloudData,           onRetrySync: () => cloudReady ? setSyncAttempt((value) => value + 1) : window.location.reload() }} /> }
-          <footer className="page-footer">
-            <span>Mit Ruhe zum Ziel.</span>
-            <span>
-              15Punkte <i /> Deine Daten. Dein Überblick.
-            </span>
-          </footer>
         </div>
       </main>
       {showSubject && <SubjectModal subject={subjects.find((subject) => subject.id === editingSubject)} existingSubjects={subjects} onClose={() => { setShowSubject(false); setEditingSubject(null); }} onSave={saveSubject} onSaveMany={saveSubjectsMany} />}
@@ -799,23 +795,26 @@ export default function App() {
   );
 }
 
-function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit, onDelete, onGrade, onWeights, onMode, onPerformanceEdit, onPerformanceDelete }: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, written: number, oral: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
+function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit, onDelete, onGrade, onWeights, onMode, onPerformanceEdit, onPerformanceDelete }: { subjects: SchoolSubject[]; gradebook: GradebookData; semester: Semester; onSemester: (semester: Semester) => void; onAdd: () => void; onEdit: (subject: SchoolSubject) => void; onDelete: (subject: SchoolSubject) => void; onGrade: (subject: SchoolSubject, manual?: boolean) => void; onWeights: (subjectId: string, semester: Semester, area: import("../lib/gradebook").GradeArea, weight: number) => void; onMode: (subjectId: string, semester: Semester, mode: "individual" | "manual") => void; onPerformanceEdit: (performance: Performance) => void; onPerformanceDelete: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const filtered = subjects.filter((subject) => subject.name.toLowerCase().includes(query.toLowerCase())).slice().sort((a,b)=>Number(b.courseType==="Leistungsfach")-Number(a.courseType==="Leistungsfach"));
   const semesterResult = calculateSemester(gradebook, semester);
   return <>
-    <section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> NOTENVERWALTUNG · BADEN-WÜRTTEMBERG</div><h1>Deine <span>Fächer.</span></h1><p>Kurse, Gewichtungen und alle Leistungen an einem Ort.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Fach hinzufügen</button></section>
-    <div className="model-notice"><Calculator size={14} /><span><strong>Persönliche Modellrechnung</strong> · ersetzt nicht die offizielle schulische Bewertung.</span></div>
-    <section className="subject-summary"><div><span>Fächer &middot; LK / GK</span><strong>{subjects.length}<small> &middot; {subjects.filter((item) => item.courseType === "Leistungsfach").length} LK &middot; {subjects.filter((item) => item.courseType === "Basisfach").length} GK</small></strong></div><div><span>Leistungen &middot; {semesterLabel(semester)}</span><strong>{gradebook.performances.filter((item) => item.semester === semester).length}</strong></div><div><span>Halbjahresschnitt &middot; {semesterLabel(semester)}</span><strong>{semesterResult.average === null ? "–" : semesterResult.average.toFixed(2).replace(".", ",")}<small> Punkte</small></strong></div></section>
-    <article className="panel full-subjects subject-manager"><div className="panel-heading manager-heading"><div><h2>Kursübersicht</h2><p>Fach anklicken, um Noten, Gewichtung und Rechenweg zu verwalten.</p></div><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fach suchen" /></label></div><div className="semester-selector" aria-label="Halbjahr auswählen">{SEMESTERS.map((item) => <button key={item} className={semester === item ? "selected" : ""} onClick={() => onSemester(item)}>{semesterLabel(item)}</button>)}</div>
-      <div className="subject-list">{filtered.map((subject) => { const result = calculateSubject(subject, gradebook.performances, semester); const isExpanded = expanded === subject.id; const settings = subject.settings[semester]; return <section className={`managed-subject ${isExpanded ? "expanded" : ""}`} key={subject.id}><div className="managed-subject-main"><button className="subject-expand" onClick={() => setExpanded(isExpanded ? null : subject.id)} aria-expanded={isExpanded}><ChevronRight size={15} className="expand-chevron" /><span className="managed-subject-name"><strong>{subject.name}</strong><small>{subject.courseType === "Leistungsfach" ? "LK · Leistungskurs" : "GK · Grundkurs"} · Fachgewicht {subject.weight}× · {subject.state}</small></span></button><span className={`mode-badge ${settings.mode}`}>{settings.mode === "manual" ? "Manueller Schnitt" : "Einzelnoten"}</span><span className="managed-average">{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></span><div className="managed-actions"><button className="icon-button" aria-label={`${subject.name} bearbeiten`} onClick={() => onEdit(subject)}><Pencil size={14} /></button><button className="icon-button danger-hover" aria-label={`${subject.name} löschen`} onClick={() => onDelete(subject)}><X size={14} /></button></div></div>
+    <section className="page-heading"><div><h1>Fächer</h1></div><button className="button button-primary" onClick={onAdd}><Plus size={16} /> Fach hinzufügen</button></section>
+    <section className="subject-summary"><div><span>F&auml;cher &middot; LK / GK</span><strong>{subjects.length}<small> &middot; {subjects.filter((item) => item.courseType === "Leistungsfach").length} LK &middot; {subjects.filter((item) => item.courseType === "Basisfach").length} GK</small></strong></div><div><span>Schnitt · {semesterLabel(semester)}</span><strong>{semesterResult.average === null ? "\u2013" : semesterResult.average.toFixed(2).replace(".", ",")}<small> Punkte</small></strong></div></section>
+    <article className="panel full-subjects subject-manager"><div className="panel-heading manager-heading"><div><h2>Fächer im Halbjahr</h2></div><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fach suchen" /></label></div><div className="semester-selector" aria-label="Halbjahr auswählen">{SEMESTERS.map((item) => <button key={item} className={semester === item ? "selected" : ""} onClick={() => onSemester(item)}>{semesterLabel(item)}</button>)}</div>
+      <div className="subject-list">{filtered.map((subject) => { const result = calculateSubject(subject, gradebook.performances, semester); const isExpanded = expanded === subject.id; const settings = subject.settings[semester]; return <section className={`managed-subject ${isExpanded ? "expanded" : ""}`} key={subject.id}><div className="managed-subject-main"><button className="subject-expand" onClick={() => setExpanded(isExpanded ? null : subject.id)} aria-expanded={isExpanded}><ChevronRight size={15} className="expand-chevron" /><span className="managed-subject-name"><strong>{subject.name}</strong><small><span className={`course-type-pill ${subject.courseType === "Leistungsfach" ? "lk" : "gk"}`}>{subject.courseType === "Leistungsfach" ? "LK" : "GK"}</span> Gewicht {courseWeight(subject)}×</small></span></button><span className={`mode-badge ${settings.mode}`}>{settings.mode === "manual" ? "Manueller Schnitt" : "Einzelnoten"}</span><span className={`managed-average ${result.average === null ? "" : result.average >= 12 ? "good" : result.average >= 8 ? "mid" : "low"}`}>{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></span><div className="managed-actions"><button className="icon-button" aria-label={`${subject.name} bearbeiten`} onClick={() => onEdit(subject)}><Pencil size={14} /></button><button className="icon-button danger-hover" aria-label={`${subject.name} löschen`} onClick={() => onDelete(subject)}><X size={14} /></button></div></div>
         {isExpanded && <div className="subject-details">{settings.mode === "manual" ? <div className="manual-average-panel"><div><span>Übernommener manueller Schnitt · {semesterLabel(semester)}</span><strong>{settings.manualAverage === null ? "Noch nicht gesetzt" : `${settings.manualAverage.toFixed(2).replace(".", ",")} Punkte`}</strong><small>Dieser Altbestand bleibt erhalten. Für automatische Berechnung bitte auf Einzelleistungen umstellen.</small></div><button className="button button-quiet small-button" onClick={() => onMode(subject.id, semester, "individual")}>Einzelleistungen verwenden</button></div> : <>
-            <div className="area-weight-grid"><AreaSummary title="Schriftlich" result={result.written} weight={settings.writtenWeight} onWeight={(value) => onWeights(subject.id, semester, value, settings.oralWeight)} /><AreaSummary title="Mündlich" result={result.oral} weight={settings.oralWeight} onWeight={(value) => onWeights(subject.id, semester, settings.writtenWeight, value)} /></div>
+            <p className="weight-help">Gewichte sind Verhältnisse: 60 und 40 ergeben 60:40.</p><div className="area-weight-grid"><AreaSummary title="Schriftlich" result={result.written} weight={settings.writtenWeight} onWeight={(value) => onWeights(subject.id, semester, "written", value)} /><AreaSummary title="Mündlich" result={result.oral} weight={settings.oralWeight} onWeight={(value) => onWeights(subject.id, semester, "oral", value)} /><AreaSummary title="Praktisch" result={result.practical} weight={settings.practicalWeight ?? 1} onWeight={(value) => onWeights(subject.id, semester, "practical", value)} /></div>
             <div className="detail-actions"><button className="button button-primary small-button" onClick={() => onGrade(subject)}><Plus size={14} /> Leistung eintragen</button><span>Noten mit Faktor 0 werden ignoriert.</span></div>
             {gradebook.performances.filter((item) => item.subjectId === subject.id).length ? <div className="performance-table-wrap"><table className="performance-table"><thead><tr><th>HALBJAHR</th><th>LEISTUNG / ART</th><th>BEREICH</th><th>DATUM</th><th>PUNKTE</th><th>FAKTOR</th><th></th></tr></thead><tbody>{gradebook.performances.filter((item) => item.subjectId === subject.id).slice().sort((a,b)=>a.semester-b.semester).map((item) => <tr key={item.id}><td>{semesterLabel(item.semester)}</td><td><strong>{item.title || item.kind}</strong><small>{item.kind}</small></td><td>{item.area === "written" ? "Schriftlich" : "Mündlich"}</td><td>{item.date ? new Date(`${item.date}T12:00:00`).toLocaleDateString("de-DE") : "–"}</td><td><ScorePill value={item.points} compact /></td><td>{item.weight} ×</td><td><button className="text-button" onClick={() => onPerformanceEdit(item)}>Bearbeiten</button><button className="text-button remove-performance" onClick={() => onPerformanceDelete(item.id)} aria-label={`${item.title || item.kind} löschen`}><X size={14} /></button></td></tr>)}</tbody></table></div> : <p className="empty-performances">Noch keine Einzelleistungen erfasst.</p>}
           </>}
-          <details className="calculation-details"><summary>Rechenweg ansehen</summary><div className="calculation-copy">{settings.mode === "manual" ? <p>Manueller Modus: <strong>{settings.manualAverage === null ? "kein Durchschnitt eingetragen" : `${formatPoints(settings.manualAverage, 2)} Punkte`}</strong>. Es werden keine Einzelnoten angerechnet.</p> : <><p>Schriftlich: {result.written.count ? `(${result.performances.filter((item) => item.area === "written").map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(result.written.denominator, 2)} = ${formatPoints(result.written.average, 2)}` : "keine gewichteten Leistungen"}.</p><p>Mündlich: {result.oral.count ? `(${result.performances.filter((item) => item.area === "oral").map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(result.oral.denominator, 2)} = ${formatPoints(result.oral.average, 2)}` : "keine gewichteten Leistungen"}.</p><p>Fachschnitt: ({result.written.average === null ? "" : `${formatPoints(result.written.average, 2)} × ${settings.writtenWeight}`} {result.written.average !== null && result.oral.average !== null ? "+ " : ""}{result.oral.average === null ? "" : `${formatPoints(result.oral.average, 2)} × ${settings.oralWeight}`}) ÷ Summe aktiver Bereichsgewichte.</p></>}<p>Persönliche Modellrechnung – keine offizielle schulische Bewertung.</p></div></details>
+          <details className="calculation-details"><summary>Rechenweg ansehen</summary><div className="calculation-copy">{settings.mode === "manual" ? <p>Manueller Modus: <strong>{settings.manualAverage === null ? "kein Durchschnitt eingetragen" : `${formatPoints(settings.manualAverage, 2)} Punkte`}</strong>. Es werden keine Einzelnoten angerechnet.</p> : <>{([
+          { key: "written" as const, label: "Schriftlich", result: result.written, weight: settings.writtenWeight },
+          { key: "oral" as const, label: "Mündlich", result: result.oral, weight: settings.oralWeight },
+          { key: "practical" as const, label: "Praktisch", result: result.practical, weight: settings.practicalWeight ?? 1 },
+        ]).map((area) => <p key={area.key}>{area.label}: {area.result.count ? `(${result.performances.filter((item) => item.area === area.key).map((item) => `${item.points} × ${item.weight}`).join(" + ")}) ÷ ${formatPoints(area.result.denominator, 2)} = ${formatPoints(area.result.average, 2)} Punkte · Bereichsgewicht ${area.weight}` : "keine Leistungen"}.</p>)}<p>Fachschnitt = (Summe der Bereichsschnitte × Bereichsgewichte) ÷ Summe aktiver Bereichsgewichte.</p></>}<p>Persönliche Modellrechnung – keine offizielle schulische Bewertung.</p></div></details>
         </div>}
       </section>; })}{filtered.length === 0 && <p className="empty-search">Keine Fächer gefunden.</p>}</div>
     </article>
@@ -823,7 +822,7 @@ function SubjectsPage({ subjects, gradebook, semester, onSemester, onAdd, onEdit
 }
 
 function AreaSummary({ title, result, weight, onWeight }: { title: string; result: { average: number | null; count: number; denominator: number }; weight: number; onWeight: (value: number) => void }) {
-  return <div className="area-summary"><div className="area-summary-heading"><div><span>{title}</span><strong>{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></strong></div><span className="course-tag">{result.count} Leistungen</span></div><label>Bereichsgewicht <input type="number" min="0" max="20" step="0.25" value={weight} onChange={(event) => onWeight(Math.max(0, Number(event.target.value)))} />×</label><small>Rechenfaktor {result.denominator.toFixed(2).replace(".", ",")}</small></div>;
+  return <div className="area-summary"><div className="area-summary-heading"><div><span>{title}</span><strong>{result.average === null ? "–" : result.average.toFixed(2).replace(".", ",")}<small> P</small></strong></div><span className="course-tag">{result.count} Leistungen</span></div><label>Bereichsgewicht <input type="number" min="0" max="100" step="0.1" value={weight} onChange={(event) => onWeight(event.target.value === "" ? 0 : Math.min(100, Math.max(0, Number(event.target.value))))} />×</label><small>Rechenfaktor {result.denominator.toFixed(2).replace(".", ",")}</small></div>;
 }
 
 
@@ -847,6 +846,7 @@ function generatedSubjectCode(name: string, taken: Set<string>) {
 function SubjectModal({ subject, existingSubjects, onClose, onSave, onSaveMany }: { subject?: SchoolSubject; existingSubjects: SchoolSubject[]; onClose: () => void; onSave: (subject: SchoolSubject) => void; onSaveMany: (subjects: SchoolSubject[]) => void }) {
   const [courseType, setCourseType] = useState<SchoolSubject["courseType"]>(subject?.courseType ?? "Basisfach");
   const [weight, setWeight] = useState(subject?.weight ?? 1);
+  const [defaultPractical, setDefaultPractical] = useState(subject?.settings[1].practicalWeight ?? 1);
   const [defaultWritten, setDefaultWritten] = useState(subject?.settings[1].writtenWeight ?? 1);
   const [defaultOral, setDefaultOral] = useState(subject?.settings[1].oralWeight ?? 1);
   const [selected, setSelected] = useState<Record<string, SchoolSubject["courseType"]>>({});
@@ -872,8 +872,8 @@ function SubjectModal({ subject, existingSubjects, onClose, onSave, onSaveMany }
     if (custom && !existingNames.has(custom.toLocaleLowerCase("de")) && !entries.some(([name]) => name.toLocaleLowerCase("de") === custom.toLocaleLowerCase("de"))) entries.push([custom, customCourseType]);
     const added: SchoolSubject[] = entries.filter(([name]) => !existingNames.has(name.toLocaleLowerCase("de"))).map(([name, type], index) => {
       const settings = EMPTY_SEMESTER_SETTINGS();
-      SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: defaultWritten, oralWeight: defaultOral }; });
-      return { id: newId(), name, code: generatedSubjectCode(name, taken), state: "Baden-Württemberg", courseType: type, weight: Math.max(0.1, weight), settings, color: COLORS[(existingSubjects.length + index) % COLORS.length] };
+      SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: defaultWritten, oralWeight: defaultOral, practicalWeight: defaultPractical }; });
+      return { id: newId(), name, code: generatedSubjectCode(name, taken), state: "Baden-Württemberg", courseType: type, weight: type === "Leistungsfach" ? 2 : Math.max(0.1, weight), settings, color: COLORS[(existingSubjects.length + index) % COLORS.length] };
     });
     onSaveMany(added);
   };
@@ -883,17 +883,17 @@ function SubjectModal({ subject, existingSubjects, onClose, onSave, onSaveMany }
     if (subject) {
       const name = (event.currentTarget.elements.namedItem("subject-name") as HTMLSelectElement).value;
       const settings = { ...subject.settings };
-      SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: defaultWritten, oralWeight: defaultOral }; });
-      onSave({ ...subject, name, courseType, weight: Math.max(0.1, weight), settings });
+      SEMESTERS.forEach((semester) => { settings[semester] = { ...settings[semester], writtenWeight: defaultWritten, oralWeight: defaultOral, practicalWeight: defaultPractical }; });
+      onSave({ ...subject, name, courseType, weight: courseType === "Leistungsfach" ? 2 : Math.max(0.1, weight), settings });
     } else saveSelected();
   }}>
     <div className="modal-heading"><div><span className="eyebrow small-eyebrow">FÄCHERVERWALTUNG</span><h2 id="subject-modal-title">{subject ? "Fach bearbeiten" : "Fächer schnell hinzufügen"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={17} /></button></div>
     {subject ? <div className="form-grid">
       <label className="form-label full-field">Fachname<select name="subject-name" defaultValue={subject.name}>{[...new Set([...names, subject.name])].sort((a,b)=>a.localeCompare(b,"de")).map((name)=><option key={name}>{name}</option>)}</select></label>
       <label className="form-label">Kursart<select value={courseType} onChange={(event) => setCourseType(event.target.value as SchoolSubject["courseType"])}><option value="Basisfach">GK · Grundkurs</option><option value="Leistungsfach">LK · Leistungskurs</option></select></label>
-      <label className="form-label">Fachgewicht<input type="number" min="0.1" max="10" step="0.1" value={weight} onChange={(event) => setWeight(Number(event.target.value))} /></label>
-      <label className="form-label">Schriftliches Gewicht<input type="number" min="0" max="20" step="0.25" value={defaultWritten} onChange={(event) => setDefaultWritten(Number(event.target.value))} /></label>
-      <label className="form-label">Mündliches Gewicht<input type="number" min="0" max="20" step="0.25" value={defaultOral} onChange={(event) => setDefaultOral(Number(event.target.value))} /></label>
+      <label className="form-label">Fachgewicht<input type="number" min="0.1" max="10" step="0.1" value={courseType === "Leistungsfach" ? 2 : weight} disabled={courseType === "Leistungsfach"} onChange={(event) => setWeight(Number(event.target.value))} />{courseType === "Leistungsfach" && <small className="form-help">LK wird automatisch doppelt gewichtet.</small>}</label>
+      <label className="form-label">Schriftliches Gewicht<input type="number" min="0" max="100" step="0.1" value={defaultWritten} onChange={(event) => setDefaultWritten(Number(event.target.value))} /></label>
+      <label className="form-label">Mündliches Gewicht<input type="number" min="0" max="100" step="0.1" value={defaultOral} onChange={(event) => setDefaultOral(Number(event.target.value))} /></label><label className="form-label">Praktisches Gewicht<input type="number" min="0" max="100" step="0.1" value={defaultPractical} onChange={(event) => setDefaultPractical(Number(event.target.value))} /></label>
     </div> : <>
       <p className="subject-entry-help">Wähle deine Fächer, stelle GK oder LK ein und lege mehrere zusammen an. Welche Kurse deine Schule anbietet, kann abweichen.</p>
       <label className="form-label subject-search">Fach suchen<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="z. B. Biologie" /></label>

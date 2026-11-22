@@ -753,3 +753,29 @@ body { font-size: 16px; }
   .grades-table, .performance-table { min-width: 560px; }
   .performance-table { min-width: 740px; }
 }
+
+/* Clearer hierarchy for the two main grade summaries and practical weights. */
+.subject-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.area-weight-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.area-summary { padding: 15px; }
+.area-summary-heading > div > span { font-size: 14px; }
+.area-summary-heading strong { font-size: 21px; }
+.area-summary .course-tag { font-size: 12px; }
+.area-summary label { font-size: 13px; gap: 8px; }
+.area-summary input { font-size: 16px; min-height: 42px; width: 78px; }
+.area-summary > small { font-size: 12px; }
+.weight-help { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 8px 0 12px; }
+.course-type-pill { align-items: center; border-radius: 999px; display: inline-flex; font-size: 12px; font-weight: 700; justify-content: center; line-height: 1; min-width: 32px; padding: 5px 8px; vertical-align: middle; }
+.course-type-pill.lk { background: var(--accent-soft); color: var(--accent); }
+.course-type-pill.gk { background: var(--surface-2); color: var(--muted); }
+.managed-average { border-radius: 8px; padding: 6px 9px; }
+.managed-average.good, .main-metric.good { background: color-mix(in srgb, var(--good-bg) 72%, var(--surface)); color: var(--good); }
+.managed-average.mid, .main-metric.mid { background: color-mix(in srgb, var(--mid-bg) 72%, var(--surface)); color: var(--mid); }
+.managed-average.low, .main-metric.low { background: color-mix(in srgb, var(--low-bg) 72%, var(--surface)); color: var(--low); }
+.main-metric { border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
+@media (max-width: 900px) { .area-weight-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .subject-summary { grid-template-columns: 1fr 1fr; }
+  .subject-summary > div { padding: 13px 10px; }
+  .main-metric { min-height: 140px; }
+}
