@@ -2,7 +2,6 @@
 import App from '../components/App';
 import '../styles/global.css';
 import { BADEN_WUERTTEMBERG_RULES, BW_ABITUR_2028_RULES } from '../lib/states/baden-wuerttemberg';
-
 const websiteUrl = 'https://15pkt.pages.dev';
 const structuredData = {
   '@context': 'https://schema.org',
@@ -13,13 +12,13 @@ const structuredData = {
   url: websiteUrl,
   inLanguage: 'de-DE',
   description: 'Kostenloser Notenmanager fürs Abi: Oberstufen-Noten, Fächer, Halbjahresschnitte und Abitur 2028 für Baden-Württemberg – lokal im Gastmodus oder synchronisiert mit Google-Konto.',
-  featureList: ['Oberstufen-Noten und Fächer verwalten', 'Noten nach Halbjahr eintragen', 'Fachschnitte und Notendurchschnitt berechnen', 'Notenstatistiken und Zielnoten', 'Persönliche Abiturprognose', 'Abiturregelwerk Baden-Württemberg 2028', 'Lokaler JSON-Export und Import', 'Optionale Google-Anmeldung und Cloud-Synchronisierung'],
+  featureList: ['Oberstufen-Noten und Fächer verwalten', 'Noten nach Halbjahr eintragen', 'Fachschnitte und Notendurchschnitt berechnen', 'Abitur-Gesamtqualifikation aus Block I und Block II berechnen', 'Offizielle Regelquellen für Baden-Württemberg', 'Lokaler JSON-Export und Import', 'Optionale Google-Anmeldung und Cloud-Synchronisierung'],
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'EUR' },
 };
 const aboutSchema = {
   '@context': 'https://schema.org',
   '@type': 'WebPage',
-  name: 'Abiturregelwerk Baden-Württemberg',
+  name: 'Abiturregeln Baden-Württemberg',
   about: 'Gymnasiale Oberstufe und Abiturjahrgang 2028',
   url: `${websiteUrl}/#regeln`,
   dateModified: BW_ABITUR_2028_RULES.sourceCheckedOn,
@@ -30,14 +29,14 @@ const faqSchema = {
   '@type': 'FAQPage',
   mainEntity: [
     { '@type': 'Question', name: 'Wo speichert 15Punkte meine Noten?', acceptedAnswer: { '@type': 'Answer', text: 'Ohne Anmeldung bleiben Fächer, Leistungen, Ziele und Einstellungen lokal in deinem Browser. Wenn du dich mit Google anmeldest, wird dein Notenbuch in Firestore gespeichert und ist durch Regeln auf dein eigenes Konto beschränkt. Ein JSON-Export bleibt verfügbar.' } },
-    { '@type': 'Question', name: 'Ist die Abiturnote eine amtliche Berechnung?', acceptedAnswer: { '@type': 'Answer', text: 'Die Abituransicht unterscheidet zwischen persönlicher Prognose und offizieller Berechnung. Fehlende Pflichtfach- und Zulassungsangaben werden angezeigt; eine verbindliche Entscheidung trifft die Schule.' } },
-    { '@type': 'Question', name: 'Für welche Oberstufe gelten die angezeigten Regeln?', acceptedAnswer: { '@type': 'Answer', text: 'Das dokumentierte Regelmodul bezieht sich auf das allgemeinbildende Gymnasium in Baden-Württemberg und den Abiturjahrgang 2028. Andere Jahrgänge müssen eigene geprüfte Regelmodule erhalten.' } },
+    { '@type': 'Question', name: 'Wie funktioniert der Abiturrechner?', acceptedAnswer: { '@type': 'Answer', text: 'Der Abiturrechner fasst Kursleistungen aus Block I und Prüfungsergebnisse aus Block II zusammen. Er dient der persönlichen Orientierung; verbindliche Vorgaben und Ergebnisse bestätigt die Schule.' } },
+    { '@type': 'Question', name: 'Für welchen Abiturjahrgang gelten die hinterlegten Quellen?', acceptedAnswer: { '@type': 'Answer', text: 'Das dokumentierte Regelmodul bezieht sich auf das allgemeinbildende Gymnasium in Baden-Württemberg und den Abiturjahrgang 2028. Andere Jahrgänge können abweichende Vorgaben haben.' } },
   ],
 };
 const jsonLd = (schema: object) => JSON.stringify(schema).replace(/</g, '\\u003c');
 
 const title = 'Notenmanager fürs Abi – Noten & Fächer im Blick | 15Punkte';
-const description = 'Mit dem kostenlosen Notenmanager 15Punkte trägst du Oberstufen-Noten einfach ein, berechnest Fach- und Halbjahresschnitte und planst dein Abi in Baden-Württemberg.';
+const description = 'Mit dem kostenlosen Notenmanager 15Punkte verwaltest du Oberstufen-Noten und Fächer, vergleichst Halbjahre und berechnest deine Abitur-Gesamtqualifikation für Baden-Württemberg.';
 ---
 <!doctype html>
 <html lang="de">

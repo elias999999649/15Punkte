@@ -2,7 +2,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Calculator, Plus, T
 import { calculateSemester, calculateSubject, formatPoints, SEMESTERS, semesterLabel, type GradebookData } from "../lib/gradebook";
 
 export function Dashboard({data,average,performanceCount,onAddGrade,onOpenSubjects,onShowCalculation}:{data:GradebookData;average:number|null;performanceCount:number;onAddGrade:()=>void;onOpenSubjects:()=>void;onShowCalculation:()=>void}){
- const subjects=data.subjects,performances=data.performances;
+ const subjects=data.subjects.slice().sort((a,b)=>Number(b.courseType==="Leistungsfach")-Number(a.courseType==="Leistungsfach")),performances=data.performances;
  const semesters=SEMESTERS.map((semester)=>({semester,...calculateSemester(data,semester)}));
  const latest=[...semesters].reverse().find((item)=>item.average!==null);
  const ranked=(latest?.results??[]).slice().sort((a,b)=>(b.average??0)-(a.average??0));

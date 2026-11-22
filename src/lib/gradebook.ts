@@ -1,12 +1,7 @@
 export const SEMESTERS = [1, 2, 3, 4] as const;
 export type Semester = (typeof SEMESTERS)[number];
 export type CourseType = "Leistungsfach" | "Basisfach";
-export type GradeKind =
-  | "Klausur"
-  | "Mündliche Note"
-  | "GFS"
-  | "Test / Klassenarbeit"
-  | "Sonstige Leistung";
+export type GradeKind = string;
 export type GradeArea = "written" | "oral";
 export type EntryMode = "individual" | "manual";
 
@@ -225,12 +220,12 @@ export function calculateOverall(data: GradebookData) {
 
 export const GRADEBOOK_SCHEMA_VERSION = 2 as const;
 export type UserGoal = { id: string; kind: "subject" | "overall" | "abi"; subjectId?: string; title: string; target: number; createdAt: string };
-export type AppPreferences = { state: string; schoolType: string; schoolYear: string; currentSemester: Semester; theme: "light" | "dark" | "sepia" };
+export type AppPreferences = { state: string; schoolType: string; schoolYear: string; currentSemester: Semester; theme: "light" | "dark" | "sepia"; customGradeKinds?: string[] };
 export type GradebookDocument = { app: "15punkte"; schemaVersion: typeof GRADEBOOK_SCHEMA_VERSION; exportedAt?: string; data: GradebookData; goals: UserGoal[]; preferences: AppPreferences };
 
-export const defaultPreferences = (): AppPreferences => ({ state: "Baden-Württemberg", schoolType: "Allgemeinbildendes Gymnasium", schoolYear: "2025/26", currentSemester: 1, theme: "light" });
+export const defaultPreferences = (): AppPreferences => ({ state: "Baden-Württemberg", schoolType: "Allgemeinbildendes Gymnasium", schoolYear: "2025/26", currentSemester: 1, theme: "light", customGradeKinds: [] });
 export const emptyGoals = (): UserGoal[] => [];
-export function createDocument(data: GradebookData, goals: UserGoal[], preferences: AppPreferences): GradebookDocument { return { app: "15punkte", schemaVersion: GRADEBOOK_SCHEMA_VERSION, data, goals, preferences }; }
+export function createDocument(data: GradebookData, goals: UserGoal[], preferences: AppPreferences): GradebookDocument { return { app: "15punkte", schemaVersion: GRADEBOOK_SCHEMA_VERSION, data, goals, preferences: { ...preferences, customGradeKinds: preferences.customGradeKinds ?? [] } }; }
 
 export function validateGradebookDocument(value: unknown): { ok: true; document: GradebookDocument } | { ok: false; error: string } {
   if (!value || typeof value !== "object") return { ok: false, error: "Die Datei enthält kein JSON-Objekt." };
@@ -239,6 +234,10 @@ export function validateGradebookDocument(value: unknown): { ok: true; document:
   if (record.schemaVersion !== GRADEBOOK_SCHEMA_VERSION) return { ok: false, error: `Nicht unterstützte Datenversion (${String(record.schemaVersion)}). Erwartet wird Version ${GRADEBOOK_SCHEMA_VERSION}.` };
   const document = record as unknown as GradebookDocument;
   if (!document.data || !Array.isArray(document.data.subjects) || !Array.isArray(document.data.performances) || !Array.isArray(document.goals) || !document.preferences) return { ok: false, error: "Datenstruktur unvollständig." };
+  const customGradeKinds = document.preferences.customGradeKinds ?? [];
+  if (!Array.isArray(customGradeKinds)) return { ok: false, error: "Die eigenen Notenarten sind ungültig." };
+  const normalizedKinds = customGradeKinds.map((kind) => typeof kind === "string" ? kind.trim().toLocaleLowerCase("de") : "");
+  if (customGradeKinds.length > 30 || customGradeKinds.some((kind, index) => typeof kind !== "string" || !kind.trim() || kind.length > 40 || GRADE_KINDS.some((standard) => standard.toLocaleLowerCase("de") === normalizedKinds[index])) || new Set(normalizedKinds).size !== customGradeKinds.length) return { ok: false, error: "Die eigenen Notenarten enthalten ungültige oder doppelte Einträge." };
   const subjectIds = new Set<string>();
   for (const subject of document.data.subjects) {
     if (!subject || typeof subject.id !== "string" || !subject.id || subjectIds.has(subject.id) || typeof subject.name !== "string" || !subject.name.trim() || typeof subject.code !== "string" || !(subject.courseType === "Basisfach" || subject.courseType === "Leistungsfach") || !Number.isFinite(subject.weight) || subject.weight <= 0 || !subject.settings || ![1, 2, 3, 4].every((semester) => subject.settings[semester as Semester] && ["individual", "manual"].includes(subject.settings[semester as Semester].mode))) return { ok: false, error: "Mindestens ein Fach enthält ungültige oder fehlende Angaben." };
@@ -246,14 +245,14 @@ export function validateGradebookDocument(value: unknown): { ok: true; document:
   }
   const performanceIds = new Set<string>();
   for (const item of document.data.performances) {
-    if (!item || typeof item.id !== "string" || !item.id || performanceIds.has(item.id) || !subjectIds.has(item.subjectId) || ![1, 2, 3, 4].includes(item.semester) || !Number.isInteger(item.points) || item.points < 0 || item.points > 15 || !GRADE_KINDS.includes(item.kind) || !["written", "oral"].includes(item.area) || !Number.isFinite(item.weight) || item.weight < 0 || typeof item.title !== "string" || typeof item.date !== "string") return { ok: false, error: "Mindestens eine Leistung enthält ungültige Angaben (Fach, Halbjahr, Punkte oder Gewichtung)." };
+    if (!item || typeof item.id !== "string" || !item.id || performanceIds.has(item.id) || !subjectIds.has(item.subjectId) || ![1, 2, 3, 4].includes(item.semester) || !Number.isInteger(item.points) || item.points < 0 || item.points > 15 || !(GRADE_KINDS.includes(item.kind) || customGradeKinds.includes(item.kind)) || !["written", "oral"].includes(item.area) || !Number.isFinite(item.weight) || item.weight < 0 || typeof item.title !== "string" || typeof item.date !== "string") return { ok: false, error: "Mindestens eine Leistung enthält ungültige Angaben (Fach, Halbjahr, Punkte oder Gewichtung)." };
     if (document.data.subjects.find((subject) => subject.id === item.subjectId)!.settings[item.semester].mode === "manual") return { ok: false, error: "Die Datei enthält zugleich einen manuellen Schnitt und Einzelnoten für dasselbe Fach/Halbjahr." };
     performanceIds.add(item.id);
   }
   for (const goal of document.goals) if (!goal || typeof goal.id !== "string" || !["subject", "overall", "abi"].includes(goal.kind) || !Number.isFinite(goal.target) || goal.target < 0 || goal.target > 15 || (goal.kind === "subject" && !subjectIds.has(goal.subjectId ?? ""))) return { ok: false, error: "Mindestens ein Zielwert ist ungültig oder verweist auf ein unbekanntes Fach." };
   const prefs = document.preferences;
   if (!["Baden-Württemberg"].includes(prefs.state) || prefs.schoolType !== "Allgemeinbildendes Gymnasium" || typeof prefs.schoolYear !== "string" || ![1,2,3,4].includes(prefs.currentSemester) || !["light","dark","sepia"].includes(prefs.theme)) return { ok: false, error: "Einstellungen enthalten nicht unterstützte Werte." };
-  return { ok: true, document };
+  return { ok: true, document: { ...document, preferences: { ...document.preferences, customGradeKinds } } };
 }
 
 export function exportGradebook(document: GradebookDocument): string { return JSON.stringify({ ...document, exportedAt: new Date().toISOString() }, null, 2); }

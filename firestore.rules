@@ -30,12 +30,16 @@ service cloud.firestore {
           'schoolType',
           'schoolYear',
           'currentSemester',
-          'theme'
+          'theme',
+          'customGradeKinds'
         ])
         && document.preferences.state is string
         && document.preferences.schoolType is string
         && document.preferences.schoolYear is string
         && document.preferences.currentSemester is int
+        && (!('customGradeKinds' in document.preferences)
+          || (document.preferences.customGradeKinds is list
+            && document.preferences.customGradeKinds.size() <= 30))
         && document.preferences.theme in ['light', 'dark', 'sepia'];
     }
 

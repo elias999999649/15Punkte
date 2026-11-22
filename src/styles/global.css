@@ -185,6 +185,38 @@ h1 span { color: var(--muted); font-weight: 400; }
 .search-field:focus-within { border-color: var(--accent); }
 .search-field input { background: transparent; border: 0; color: var(--text); font-size: 10px; outline: none; width: 110px; }
 .search-field input::placeholder { color: var(--subtle); }
+
+body { font-size: 15px; }
+.brand-beta { display: none; }
+.school-copy strong, .profile-copy strong { font-size: 13px; }
+.school-copy small, .profile-copy small { font-size: 11px; }
+.nav-label { font-size: 10px; }
+.nav-item { font-size: 14px; }
+.privacy-note strong, .privacy-note span { font-size: 11px; }
+.breadcrumbs { font-size: 12px; }
+.school-year { font-size: 11px; }
+.eyebrow { font-size: 10px; }
+.small-eyebrow { font-size: 9px; }
+.page-heading p { font-size: 14px; }
+.button { font-size: 13px; }
+.metric-top { font-size: 12px; }
+.metric-foot { font-size: 11px; }
+.panel-heading h2, .settings-section-title h2 { font-size: 15px; }
+.panel-heading p, .settings-section-title p { font-size: 12px; }
+.text-button { font-size: 12px; }
+.grades-table th { font-size: 10px; }
+.grades-table td { font-size: 12px; }
+.subject-mark { font-size: 10px; }
+.subject-name { font-size: 12px; }
+.subject-name small { font-size: 10px; }
+.score-pill.compact { font-size: 11px; }
+.score-suffix { font-size: 9px; }
+.trend { font-size: 11px; }
+.course-tag, .history-grade, .history-empty { font-size: 11px; }
+.search-field input { font-size: 12px; }
+.form-label, .setting-control { font-size: 13px; }
+.form-help, .setting-control small { font-size: 11px; }
+.page-footer { font-size: 11px; }
 .empty-search { color: var(--muted); font-size: 11px; padding: 32px; text-align: center; }
 .abi-hero { align-items: center; display: flex; justify-content: space-between; min-height: 300px; overflow: hidden; padding: 40px 54px; position: relative; }
 .abi-hero::after { border: 1px solid var(--line); border-radius: 50%; content: ''; height: 360px; position: absolute; right: 8%; top: -140px; width: 360px; }

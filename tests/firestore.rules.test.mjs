@@ -20,6 +20,7 @@ const validDocument = {
     schoolYear: "2025/26",
     currentSemester: 1,
     theme: "light",
+    customGradeKinds: [],
   },
 };
 
@@ -59,6 +60,28 @@ test("anonymous users and invalid or unexpected documents are denied", async () 
     setDoc(pathFor(alice, "alice"), {
       ...validDocument,
       preferences: { ...validDocument.preferences, theme: "neon" },
+    }),
+  );
+});
+
+test("custom grade kinds are accepted within the configured limit", async () => {
+  const alice = environment.authenticatedContext("alice").firestore();
+  const document = pathFor(alice, "alice");
+  const customGradeKinds = Array.from({ length: 30 }, (_, index) => `Eigene Art ${index + 1}`);
+
+  await assertSucceeds(
+    setDoc(document, {
+      ...validDocument,
+      preferences: { ...validDocument.preferences, customGradeKinds },
+    }),
+  );
+  await assertFails(
+    setDoc(document, {
+      ...validDocument,
+      preferences: {
+        ...validDocument.preferences,
+        customGradeKinds: [...customGradeKinds, "Zu viele"],
+      },
     }),
   );
 });
