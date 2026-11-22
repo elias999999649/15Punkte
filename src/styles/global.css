@@ -605,6 +605,26 @@ body { font-size: 15px; }
 .metric-grid.dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .dashboard-semesters { margin-bottom: 16px; }
 .dashboard-empty { color: var(--muted); font-size: 14px; line-height: 1.5; padding: 0 18px 12px; }
+.subject-entry-modal { max-height: min(88vh, 850px); overflow-y: auto; }
+.subject-entry-help { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0 0 12px; }
+.subject-search { margin: 8px 0 12px; }
+.subject-option-groups { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.subject-option-group { border: 1px solid var(--line); border-radius: 8px; margin: 0; min-width: 0; padding: 8px 10px; }
+.subject-option-group legend { align-items: center; color: var(--muted); display: flex; font-size: 13px; font-weight: 600; justify-content: space-between; padding: 0 5px; width: 100%; }
+.subject-option-group legend button { background: transparent; border: 0; color: var(--accent); cursor: pointer; font-size: 12px; padding: 4px; }
+.subject-option { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: space-between; min-height: 38px; padding: 4px 0; }
+.subject-option > label { align-items: center; display: flex; flex: 1; gap: 8px; min-width: 0; }
+.subject-option > label span { font-size: 14px; line-height: 1.3; }
+.subject-option > label input { accent-color: var(--accent); flex: 0 0 auto; height: 17px; width: 17px; }
+.subject-option > select, .subject-custom-row select { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); font-size: 14px; min-height: 34px; padding: 4px 7px; }
+.subject-option.already-added { opacity: .62; }
+.subject-option.already-added > label small { color: var(--muted); font-size: 12px !important; white-space: nowrap; }
+.subject-custom-row { align-items: end; display: flex; gap: 8px; margin-top: 12px; }
+.subject-custom-row .form-label { flex: 1; min-width: 0; }
+.subject-custom-row .form-label input { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; color: var(--text); display: block; font-size: 15px; margin-top: 8px; min-height: 44px; padding: 0 11px; width: 100%; }
+.subject-custom-row .custom-course-type { flex: 0 0 75px; }
+.subject-custom-row .button { min-height: 44px; }
+.subject-selection-count { color: var(--accent); font-size: 14px; margin: 10px 0 0; }
 
 @media (max-width: 850px) and (min-width: 601px) {
   .sidebar { width: 190px; padding: 20px 12px; }
@@ -647,4 +667,10 @@ body { font-size: 15px; }
   .panel-heading p, .settings-section-title p { font-size: 13px; }
   .button { min-height: 42px; font-size: 13px; }
   .page-heading > .button { font-size: 0; min-height: 36px; }
+  .subject-option-groups { grid-template-columns: 1fr; }
+  .subject-option-group { padding: 7px 10px; }
+  .subject-custom-row { align-items: stretch; flex-wrap: wrap; }
+  .subject-custom-row .form-label { flex-basis: calc(100% - 90px); }
+  .subject-custom-row .custom-course-type { flex: 0 0 74px; }
+  .subject-custom-row .button { width: 100%; }
 }
