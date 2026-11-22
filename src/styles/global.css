@@ -779,3 +779,10 @@ body { font-size: 16px; }
   .subject-summary > div { padding: 13px 10px; }
   .main-metric { min-height: 140px; }
 }
+
+.main-metric.good .metric-value { color: var(--good); }
+.main-metric.mid .metric-value { color: var(--mid); }
+.main-metric.low .metric-value { color: var(--low); }
+.main-metric.good { border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+.main-metric.mid { border-color: color-mix(in srgb, var(--mid) 35%, var(--line)); }
+.main-metric.low { border-color: color-mix(in srgb, var(--low) 35%, var(--line)); }
