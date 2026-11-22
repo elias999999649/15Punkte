@@ -755,7 +755,7 @@ export default function App() {
         </header>
 
         <div className="content-wrap">
-          {section === "Dashboard" && <Dashboard data={gradebook} average={overall.average} performanceCount={overall.performanceCount} onAddGrade={() => setGradeTarget({})} onOpenSubjects={() => setSection("Fächer")} onShowCalculation={() => setShowCalculation(true)} />}
+          {section === "Dashboard" && <Dashboard data={gradebook} average={overall.average} onAddGrade={() => setGradeTarget({})} onOpenSubjects={() => setSection("Fächer")} onShowCalculation={() => setShowCalculation(true)} />}
           <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={(event) => void importBackup(event.target.files?.[0])} />
           {section === "Fächer" && <SubjectsPage subjects={subjects} gradebook={gradebook} semester={selectedSemester} onSemester={setSelectedSemester} onAdd={() => setShowSubject(true)} onEdit={(subject) => { setEditingSubject(subject.id); setShowSubject(true); }} onDelete={setDeleteTarget} onGrade={(subject, manual = false) => setGradeTarget({ subjectId: subject.id, semester: selectedSemester, manual })} onWeights={saveWeights} onMode={setEntryMode} onPerformanceEdit={(performance) => setGradeTarget({ performance, subjectId: performance.subjectId, semester: performance.semester })} onPerformanceDelete={deletePerformance} />}
           {section === "Regeln" && <RulesPage />}

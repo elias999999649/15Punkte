@@ -546,3 +546,105 @@ body { font-size: 15px; }
 .seo-back-link { color: var(--muted); display: block; font-size: 12px; margin-top: 18px; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 520px) { .seo-brand { margin-bottom: 32px; } .seo-card h1 { letter-spacing: -1px; } }
 @media(max-width:850px){.settings-cloud-column{grid-template-columns:1fr}}
+
+/* Readability and navigation pass: make supporting text comfortable to scan. */
+.page-heading p, .panel-heading p, .settings-section-title p, .model-notice,
+.metric-top, .metric-foot, .semester-bar-top, .development-semester,
+.development-row strong, .subject-summary span, .subject-summary strong small,
+.managed-subject-name small, .mode-badge, .entry-mode-row > span,
+.mode-switch, .area-summary-heading > div > span, .area-summary label,
+.area-summary > small, .empty-performances, .empty-search,
+.calculation-copy, .form-help, .grade-scale, .form-label,
+.setting-control, .setting-control small, .storage-status,
+.firebase-account-panel .firebase-hint, .firebase-saved-label,
+.migration-notice > strong, .migration-notice > p, .rules-intro > p,
+.rules-meta, .rules-meta strong, .block-cards > div > span,
+.block-cards p, .rules-facts li, .source-list a strong, .source-list a small,
+.qualification-block > small, .qualification-total > small, .scenario-card p,
+.checkbox-label, .eligibility-confirm, .requirement-list li,
+.official-result-panel p, .rules-note p, .rules-note h2, .search-field input,
+.managed-subject-name strong, .subject-name, .grades-table td,
+.grades-table th, .performance-table td, .performance-table th,
+.calculator-table td input, .calculator-table td select,
+.firebase-account-panel button, .theme-label small, .welcome-modal > small,
+.modal-actions .button, .text-button, .button, .nav-item, .topbar,
+.school-copy strong, .school-copy small, .profile-copy strong, .profile-copy small,
+.privacy-note strong, .privacy-note span, .setting-row, .grade-edit-link,
+.course-tag, .search-field, .page-footer, .model-caption, .abi-caption,
+.detail-meta, .note-banner strong, .note-banner p, .subject-mark {
+  font-size: max(12px, 0.9em);
+}
+.page-heading p, .panel-heading p, .settings-section-title p,
+.metric-top, .metric-foot, .subject-summary span, .managed-subject-name small,
+.mode-badge, .entry-mode-row > span, .mode-switch, .area-summary label,
+.area-summary > small, .empty-performances, .empty-search, .form-help,
+.grade-scale, .setting-control small, .storage-status,
+.firebase-account-panel .firebase-hint, .firebase-saved-label,
+.migration-notice > strong, .migration-notice > p, .rules-intro > p,
+.rules-meta, .rules-meta strong, .block-cards > div > span,
+.block-cards p, .rules-facts li, .source-list a strong, .source-list a small,
+.qualification-block > small, .qualification-total > small, .scenario-card p,
+.checkbox-label, .eligibility-confirm, .requirement-list li,
+.official-result-panel p, .rules-note p, .rules-note h2,
+.theme-label small, .welcome-modal > small, .privacy-note strong,
+.privacy-note span, .page-footer, .model-caption, .abi-caption, .detail-meta {
+  line-height: 1.45;
+}
+.grades-table th, .performance-table th { font-size: 12px; }
+.grades-table td, .performance-table td { font-size: 14px; }
+.grades-table .subject-name, .managed-subject-name strong { font-size: 14px; }
+.grades-table .subject-name small, .managed-subject-name small { font-size: 12px; }
+.score-pill.compact, .score-pill.compact .score-suffix { font-size: 12px; }
+.eyebrow, .small-eyebrow, .nav-label, .form-label > span:first-child { font-size: 12px; letter-spacing: .03em; }
+.app-shell small { font-size: 12px !important; line-height: 1.4; }
+.form-label input, .form-label select, .setting-control input, .setting-control select { font-size: 15px; min-height: 44px; }
+.performance-table td:first-child strong, .performance-table td:last-child .text-button { font-size: 13px; }
+.performance-table td:first-child small { font-size: 12px; }
+.calculator-table td input[type=number], .calculator-table td select { font-size: 14px; min-height: 38px; }
+.breadcrumbs, .school-year { font-size: 13px; }
+.metric-grid.dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dashboard-semesters { margin-bottom: 16px; }
+.dashboard-empty { color: var(--muted); font-size: 14px; line-height: 1.5; padding: 0 18px 12px; }
+
+@media (max-width: 850px) and (min-width: 601px) {
+  .sidebar { width: 190px; padding: 20px 12px; }
+  .main-area { margin-left: 190px; }
+  .brand { justify-content: flex-start; margin-left: 5px; }
+  .brand-name, .nav-label, .nav-item span, .profile-button > svg,
+  .school-switch > svg { display: initial; }
+  .school-copy, .profile-copy { display: flex; }
+  .privacy-note { display: flex; }
+  .school-switch { justify-content: flex-start; margin-left: 0; margin-right: 0; }
+  .main-nav { display: grid; }
+  .nav-item { justify-content: flex-start; padding: 0 10px; }
+  .profile-button { justify-content: flex-start; }
+}
+@media (max-width: 600px) {
+  html { min-width: 320px; }
+  .sidebar { align-items: stretch; bottom: 0; height: 68px; left: 0; padding: 4px 6px; top: auto; width: 100%; z-index: 8; border-right: 0; border-top: 1px solid var(--line); }
+  .sidebar > .brand, .sidebar > .school-switch, .sidebar > .nav-label, .sidebar-bottom { display: none; }
+  .main-nav { align-items: stretch; display: flex; gap: 3px; height: 100%; }
+  .nav-item { align-items: center; display: flex; flex: 1; flex-direction: column; font-size: 12px; gap: 3px; height: 58px; justify-content: center; padding: 3px 1px; }
+  .nav-item span { display: inline; }
+  .nav-item .nav-count { display: none; }
+  .nav-item.active::after { bottom: 1px; height: 2px; left: 25%; right: auto; width: 50%; }
+  .main-area { margin-left: 0; }
+  .content-wrap { padding: 24px 14px 88px; }
+  .topbar { padding: 0 14px; }
+  .page-heading { align-items: center; }
+  h1 { font-size: 29px; }
+  .page-heading p, .model-notice { font-size: 14px; }
+  .model-notice { line-height: 1.45; }
+  .metric-grid.dashboard-metrics { grid-template-columns: 1fr 1fr; gap: 9px; }
+  .metric-card { min-height: 116px; padding: 13px 11px; }
+  .metric-top, .metric-foot { font-size: 12px; }
+  .metric-value { font-size: 25px; }
+  .semester-bars { gap: 14px 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 18px 14px 6px; }
+  .semester-bar-top, .semester-bar > small { font-size: 12px; }
+  .dashboard-subject-panel .grades-table { min-width: 500px; }
+  .panel-heading { gap: 12px; }
+  .panel-heading h2, .settings-section-title h2 { font-size: 16px; }
+  .panel-heading p, .settings-section-title p { font-size: 13px; }
+  .button { min-height: 42px; font-size: 13px; }
+  .page-heading > .button { font-size: 0; min-height: 36px; }
+}
